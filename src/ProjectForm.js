@@ -13,7 +13,8 @@ const ProjectForm = () => {
     season: '',
     status: 'Pending',
     type: 'Normal',
-    budget: ''
+    budget: '',
+    wordCount: ''  // Added wordCount field
   };
 
   const [project, setProject] = useState(initialProjectState);
@@ -60,7 +61,7 @@ const ProjectForm = () => {
     e.preventDefault();
     
     if (!project.projectName || !project.submissionDate || !project.supervisorName || 
-        !project.season || !project.budget) {
+        !project.season || !project.budget || !project.wordCount) {  // Added wordCount validation
       alert('Please fill in all required fields');
       return;
     }
@@ -73,7 +74,8 @@ const ProjectForm = () => {
         season: project.season.trim(),
         status: project.status,
         type: project.type,
-        budget: parseFloat(project.budget)
+        budget: parseFloat(project.budget),
+        wordCount: parseInt(project.wordCount)  // Added wordCount to projectData
       };
 
       if (editingId) {
@@ -105,7 +107,6 @@ const ProjectForm = () => {
       }
     }
   };
-
   const handleEdit = (projectToEdit) => {
     setProject({
       projectName: projectToEdit.projectName,
@@ -114,7 +115,8 @@ const ProjectForm = () => {
       season: projectToEdit.season,
       status: projectToEdit.status,
       type: projectToEdit.type,
-      budget: projectToEdit.budget.toString()
+      budget: projectToEdit.budget?.toString() ?? '0',
+      wordCount: projectToEdit.wordCount?.toString() ?? '0'  // Added null check
     });
     setEditingId(projectToEdit.id);
   };
@@ -125,7 +127,8 @@ const ProjectForm = () => {
       filteredProjects.map(({ id, ...rest }) => ({
         ...rest,
         submissionDate: new Date(rest.submissionDate).toLocaleDateString(),
-        budget: `$${rest.budget.toLocaleString()}`
+        budget: `$${rest.budget?.toLocaleString() ?? 0}`,
+        wordCount: rest.wordCount?.toLocaleString() ?? '0'  // Added null check
       }))
     );
     
@@ -212,7 +215,7 @@ const ProjectForm = () => {
             </div>
 
             <div className="row">
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <Form.Group className="mb-3">
                   <Form.Label>Status</Form.Label>
                   <Form.Select
@@ -225,7 +228,7 @@ const ProjectForm = () => {
                   </Form.Select>
                 </Form.Group>
               </div>
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <Form.Group className="mb-3">
                   <Form.Label>Project Type</Form.Label>
                   <Form.Select
@@ -237,7 +240,7 @@ const ProjectForm = () => {
                   </Form.Select>
                 </Form.Group>
               </div>
-              <div className="col-md-4">
+              <div className="col-md-3">
                 <Form.Group className="mb-3">
                   <Form.Label>Budget*</Form.Label>
                   <Form.Control
@@ -247,6 +250,19 @@ const ProjectForm = () => {
                     required
                     min="0"
                     step="0.01"
+                  />
+                </Form.Group>
+              </div>
+              <div className="col-md-3">
+                <Form.Group className="mb-3">
+                  <Form.Label>Word Count*</Form.Label>
+                  <Form.Control
+                    type="number"
+                    value={project.wordCount}
+                    onChange={(e) => setProject({...project, wordCount: e.target.value})}
+                    required
+                    min="0"
+                    step="1"
                   />
                 </Form.Group>
               </div>
@@ -311,48 +327,50 @@ const ProjectForm = () => {
               <th>Status</th>
               <th>Season</th>
               <th>Budget</th>
+              <th>Word Count</th>
               <th>Submission Date</th>
               <th>Actions</th>
             </tr>
           </thead>
           <tbody>
-            {currentRecords.map((project) => (
-              <tr key={project.id}>
-                <td>{project.projectName}</td>
-                <td>{project.type}</td>
-                <td>{project.supervisorName}</td>
-                <td>
-                  <Badge bg={getStatusBadgeVariant(project.status, project.submissionDate)}>
-                    {project.status}
-                    {isOverdue(project.submissionDate) && project.status !== 'Completed' && 
-                      ' (Overdue)'}
-                  </Badge>
-                </td>
-                <td>{project.season}</td>
-                <td>Ksh.{project.budget.toLocaleString()}</td>
-                <td>
-                  {new Date(project.submissionDate).toLocaleDateString()}
-                </td>
-                <td>
-                  <Button 
-                    variant="warning" 
-                    size="sm" 
-                    onClick={() => handleEdit(project)}
-                    className="me-2"
-                  >
-                    Edit
-                  </Button>
-                  <Button 
-                    variant="danger" 
-                    size="sm" 
-                    onClick={() => handleDelete(project.id)}
-                  >
-                    Delete
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
+              {currentRecords.map((project) => (
+                <tr key={project.id}>
+                  <td>{project.projectName}</td>
+                  <td>{project.type}</td>
+                  <td>{project.supervisorName}</td>
+                  <td>
+                    <Badge bg={getStatusBadgeVariant(project.status, project.submissionDate)}>
+                      {project.status}
+                      {isOverdue(project.submissionDate) && project.status !== 'Completed' && 
+                        ' (Overdue)'}
+                    </Badge>
+                  </td>
+                  <td>{project.season}</td>
+                  <td>Ksh.{project.budget?.toLocaleString() ?? 0}</td>
+                  <td>{project.wordCount?.toLocaleString() ?? 0}</td>  
+                  <td>
+                    {new Date(project.submissionDate).toLocaleDateString()}
+                  </td>
+                  <td>
+                    <Button 
+                      variant="warning" 
+                      size="sm" 
+                      onClick={() => handleEdit(project)}
+                      className="me-2"
+                    >
+                      Edit
+                    </Button>
+                    <Button 
+                      variant="danger" 
+                      size="sm" 
+                      onClick={() => handleDelete(project.id)}
+                    >
+                      Delete
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+     </tbody>
         </Table>
       </div>
 

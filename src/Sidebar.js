@@ -1,11 +1,17 @@
 import React, { useState } from 'react';
 import { Nav, Button } from 'react-bootstrap';
-import { useNavigate, useLocation } from 'react-router-dom';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { signOut } from 'firebase/auth';
 import { auth } from './firebase';
-import { Link } from 'react-router-dom';
 import logo from './logo/logo.png';
-import Login from './Login';
+
+const menuItems = [
+  { path: '/dashboard', name: 'Dashboard', icon: 'bi-house-door-fill' },
+  { path: '/projects', name: 'Projects', icon: 'bi-file-text-fill' },
+  { path: '/employees', name: 'Employees', icon: 'bi-people-fill' },
+  { path: '/reports', name: 'Reports', icon: 'bi-bar-chart-fill' },
+  { path: '/profile', name: 'Profile', icon: 'bi-person-circle' }
+];
 
 const Sidebar = () => {
   const navigate = useNavigate();
@@ -15,21 +21,12 @@ const Sidebar = () => {
   const handleLogout = async () => {
     try {
       await signOut(auth);
-      // Redirect and reload to ensure a fresh session
       navigate('/login');
-      window.location.reload(); // Optional: Reload the page for a clean state
+      window.location.reload();
     } catch (error) {
       console.error("Error logging out:", error);
     }
   };
-
-  const menuItems = [
-    { path: '/dashboard', name: 'Dashboard', icon: 'bi-house-door-fill' },
-    { path: '/projects', name: 'Projects', icon: 'bi-file-text-fill' },
-    { path: '/employees', name: 'Employees', icon: 'bi-people-fill' },
-    { path: '/reports', name: 'Reports', icon: 'bi-bar-chart-fill' },
-    { path: '/profile', name: 'Profile', icon: 'bi-person-circle' },
-  ];
 
   return (
     <div 
@@ -61,6 +58,7 @@ const Sidebar = () => {
               variant="link" 
               className="ms-auto text-white p-0"
               onClick={() => setExpanded(!expanded)}
+              aria-label={expanded ? "Collapse sidebar" : "Expand sidebar"}
             >
               <i className={`bi ${expanded ? 'bi-chevron-left' : 'bi-chevron-right'}`}></i>
             </Button>
@@ -107,6 +105,17 @@ const Sidebar = () => {
             {expanded && 'Logout'}
           </Button>
         </div>
+
+        {/* Copyright Footer */}
+        {expanded && (
+          <div className="p-3 text-center text-white-50 border-top border-secondary">
+            <small>
+              © {new Date().getFullYear()} Kelvin Muindi
+              <br />
+              All rights reserved
+            </small>
+          </div>
+        )}
       </div>
 
       <style>{`

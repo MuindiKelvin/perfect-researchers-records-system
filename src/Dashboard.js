@@ -3,10 +3,11 @@ import { Container, Row, Col, Card, Table, Button } from 'react-bootstrap';
 import { collection, query, orderBy, getDocs } from 'firebase/firestore';
 import { db } from './firebase';
 import { Search, Users, Briefcase, AlertCircle, CheckCircle, ChevronLeft, ChevronRight } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend } from 'recharts';
 import Login from './Login';
 
 const Dashboard = () => {
+  // Previous state definitions remain the same
   const [stats, setStats] = useState({
     totalEmployees: 0,
     activeEmployees: 0,
@@ -86,7 +87,9 @@ const Dashboard = () => {
       months.push({
         name: date.toLocaleString('default', { month: 'short' }),
         completed: 0,
-        total: 0
+        total: 0,
+        normalType: 0,
+        dissertationType: 0
       });
     }
 
@@ -100,13 +103,19 @@ const Dashboard = () => {
         if (project.status === 'Completed') {
           months[monthIndex].completed++;
         }
+        // Track project types
+        if (project.type === 'Normal') {
+          months[monthIndex].normalType++;
+        } else if (project.type === 'Dissertation') {
+          months[monthIndex].dissertationType++;
+        }
       }
     });
 
     return months;
   };
 
-  // Pagination handlers
+  // Previous pagination handlers remain the same
   const handleNextEmployees = () => {
     if (employeeStartIndex + recordsPerPage < employees.length) {
       setEmployeeStartIndex(employeeStartIndex + recordsPerPage);
@@ -134,6 +143,7 @@ const Dashboard = () => {
   // Get current page records
   const currentEmployees = employees.slice(employeeStartIndex, employeeStartIndex + recordsPerPage);
   const currentProjects = projects.slice(projectStartIndex, projectStartIndex + recordsPerPage);
+
 
   return (
     <Container className="py-5">
@@ -221,8 +231,35 @@ const Dashboard = () => {
                 <XAxis dataKey="name" />
                 <YAxis />
                 <Tooltip />
-                <Line type="monotone" dataKey="total" stroke="#0d6efd" name="Total Projects" />
-                <Line type="monotone" dataKey="completed" stroke="#198754" name="Completed" />
+                <Legend />
+                <Line 
+                  type="monotone" 
+                  dataKey="total" 
+                  stroke="#0d6efd" 
+                  name="Total Projects"
+                  strokeWidth={2}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="completed" 
+                  stroke="#198754" 
+                  name="Completed"
+                  strokeWidth={2}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="normalType" 
+                  stroke="#ffc107" 
+                  name="Normal Projects"
+                  strokeWidth={2}
+                />
+                <Line 
+                  type="monotone" 
+                  dataKey="dissertationType" 
+                  stroke="#dc3545" 
+                  name="Dissertation Projects"
+                  strokeWidth={2}
+                />
               </LineChart>
             </ResponsiveContainer>
           </div>
