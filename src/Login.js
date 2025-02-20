@@ -1,16 +1,29 @@
-import React, { useState } from 'react';
-import { getAuth, signInWithEmailAndPassword } from 'firebase/auth';
+import React, { useState, useEffect } from 'react';
+import { getAuth, signInWithEmailAndPassword, sendPasswordResetEmail } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
-import { TextField, Button, Typography, Box, Container, Paper, Snackbar, Alert } from '@mui/material';
+import { Container, Card, Form, Button, InputGroup, Alert, Row, Col, Modal } from 'react-bootstrap';
 import { Link } from 'react-router-dom';
 import logo from './logo/logo.png';
 
 const Login = ({ onLogin }) => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
+  const [rememberMe, setRememberMe] = useState(false);
   const [loading, setLoading] = useState(false);
   const [notification, setNotification] = useState({ open: false, message: '', severity: 'info' });
+  const [showForgotModal, setShowForgotModal] = useState(false);
+  const [forgotEmail, setForgotEmail] = useState('');
   const navigate = useNavigate();
+
+  // Pre-fill email if "Remember Me" was previously checked
+  useEffect(() => {
+    const rememberedEmail = localStorage.getItem('rememberedEmail');
+    if (rememberedEmail) {
+      setEmail(rememberedEmail);
+      setRememberMe(true);
+    }
+  }, []);
 
   const handleLogin = async () => {
     if (!email || !password) {
@@ -33,16 +46,20 @@ const Login = ({ onLogin }) => {
         severity: 'success',
       });
 
-      // Trigger the parent component's onLogin function to update the authentication state
       onLogin();
 
-      // Delay the redirection by 1.5 seconds to let the user see the success message
+      if (rememberMe) {
+        localStorage.setItem('rememberedEmail', email);
+      } else {
+        localStorage.removeItem('rememberedEmail');
+      }
+
       setTimeout(() => navigate('/dashboard'), 1500);
     } catch (error) {
       setNotification({
         open: true,
         message: error.message,
-        severity: 'error',
+        severity: 'danger',
       });
     } finally {
       setLoading(false);
@@ -59,119 +76,222 @@ const Login = ({ onLogin }) => {
     setNotification({ ...notification, open: false });
   };
 
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
+
+  const handleForgotPasswordSubmit = async () => {
+    if (!forgotEmail) {
+      setNotification({
+        open: true,
+        message: 'Please enter your email address.',
+        severity: 'warning',
+      });
+      return;
+    }
+
+    setLoading(true);
+    const auth = getAuth();
+
+    try {
+      await sendPasswordResetEmail(auth, forgotEmail);
+      setNotification({
+        open: true,
+        message: 'Password reset email sent! Check your inbox.',
+        severity: 'success',
+      });
+      setShowForgotModal(false);
+      setForgotEmail('');
+    } catch (error) {
+      setNotification({
+        open: true,
+        message: error.message,
+        severity: 'danger',
+      });
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleForgotModalClose = () => {
+    setShowForgotModal(false);
+    setForgotEmail('');
+  };
+
   return (
-    <Container component="main" maxWidth="xs">
-      <Box
-        sx={{
-          marginTop: 8,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-        }}
-      >
-        <Paper
-          elevation={3}
-          sx={{
-            padding: 4,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            width: '100%',
-          }}
-        >
-          <Box
-            sx={{
-              mb: 3,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-            }}
-          >
-            <img
-              src={logo}
-              alt="Perfect Researchers Logo"
-              style={{
-                height: '60px',
-                marginBottom: '1rem',
-              }}
-            />
-            <Typography component="h1" variant="h5" sx={{ fontWeight: 600 }}>
-              Welcome Back
-            </Typography>
-          </Box>
+    <Container fluid className="d-flex align-items-center justify-content-center min-vh-100 login-background">
+      <Card className="shadow-lg" style={{ maxWidth: '500px', width: '100%' }}>
+        <Card.Body className="p-5">
+          <div className="text-center mb-4">
+            <img src={logo} alt="Perfect Researchers Logo" style={{ height: '70px', marginBottom: '1.5rem' }} />
+            <h3 className="fw-bold">Welcome Back</h3>
+            <p className="text-muted">Sign in to continue</p>
+          </div>
 
-          <TextField
-            margin="normal"
-            required
-            fullWidth
-            label="Email Address"
-            autoComplete="email"
-            autoFocus
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            onKeyPress={handleKeyPress}
-            sx={{ mb: 2 }}
-          />
+          {notification.open && (
+            <Alert variant={notification.severity} onClose={closeNotification} dismissible className="mb-4">
+              {notification.message}
+            </Alert>
+          )}
 
-          <TextField
-            margin="normal"
-            required
-            fullWidth
-            label="Password"
-            type="password"
-            autoComplete="current-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            onKeyPress={handleKeyPress}
-            sx={{ mb: 3 }}
-          />
+          <Form>
+            <Form.Group className="mb-3" controlId="formEmail">
+              <Form.Label>Email Address</Form.Label>
+              <InputGroup>
+                <InputGroup.Text>
+                  <i className="bi bi-envelope-fill"></i>
+                </InputGroup.Text>
+                <Form.Control
+                  type="email"
+                  placeholder="Enter email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  required
+                  autoFocus
+                />
+              </InputGroup>
+            </Form.Group>
 
-          <Button
-            fullWidth
-            variant="contained"
-            onClick={handleLogin}
-            disabled={loading}
-            sx={{
-              mb: 2,
-              py: 1.5,
-              backgroundColor: '#1976d2',
-              '&:hover': {
-                backgroundColor: '#115293',
-              },
-            }}
-          >
-            {loading ? 'Signing in...' : 'Sign In'}
-          </Button>
+            <Form.Group className="mb-3" controlId="formPassword">
+              <Form.Label>Password</Form.Label>
+              <InputGroup>
+                <InputGroup.Text>
+                  <i className="bi bi-lock-fill"></i>
+                </InputGroup.Text>
+                <Form.Control
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Enter password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  required
+                />
+                <Button
+                  variant="outline-secondary"
+                  onClick={togglePasswordVisibility}
+                  style={{ borderLeft: 'none' }}
+                >
+                  <i className={`bi ${showPassword ? 'bi-eye-slash-fill' : 'bi-eye-fill'}`}></i>
+                </Button>
+              </InputGroup>
+            </Form.Group>
 
-          <Box sx={{ mt: 1 }}>
-            <Link
-              to="/register"
-              style={{
-                textDecoration: 'none',
-                color: '#1976d2',
-                fontWeight: 500,
-              }}
+            <Row className="mb-3 align-items-center">
+              <Col xs={6}>
+                <Form.Group controlId="formRememberMe">
+                  <Form.Check
+                    type="checkbox"
+                    label="Remember Me"
+                    checked={rememberMe}
+                    onChange={(e) => setRememberMe(e.target.checked)}
+                  />
+                </Form.Group>
+              </Col>
+              <Col xs={6} className="text-end">
+                <Button
+                  variant="link"
+                  className="p-0 text-primary fw-medium"
+                  onClick={() => setShowForgotModal(true)}
+                >
+                  Forgot Password?
+                </Button>
+              </Col>
+            </Row>
+
+            <Button
+              variant="primary"
+              size="lg"
+              className="w-100 mb-3"
+              onClick={handleLogin}
+              disabled={loading}
             >
-              Don't have an account? Sign up
-            </Link>
-          </Box>
-        </Paper>
-      </Box>
+              {loading ? (
+                <>
+                  <i className="bi bi-arrow-repeat me-2" style={{ animation: 'spin 1s linear infinite' }}></i>
+                  Signing in...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-box-arrow-in-right me-2"></i>
+                  Sign In
+                </>
+              )}
+            </Button>
 
-      {/* Snackbar Notification */}
-      <Snackbar
-        open={notification.open}
-        autoHideDuration={6000}
-        onClose={closeNotification}
-      >
-        <Alert
-          onClose={closeNotification}
-          severity={notification.severity}
-          sx={{ width: '100%' }}
-        >
-          {notification.message}
-        </Alert>
-      </Snackbar>
+            <div className="text-center">
+              <Link to="/register" className="text-primary text-decoration-none fw-medium">
+                Don't have an account? Sign up
+              </Link>
+            </div>
+          </Form>
+        </Card.Body>
+      </Card>
+
+      {/* Forgot Password Modal */}
+      <Modal show={showForgotModal} onHide={handleForgotModalClose} centered>
+        <Modal.Header closeButton>
+          <Modal.Title>Reset Password</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form>
+            <Form.Group className="mb-3" controlId="formForgotEmail">
+              <Form.Label>Email Address</Form.Label>
+              <InputGroup>
+                <InputGroup.Text>
+                  <i className="bi bi-envelope-fill"></i>
+                </InputGroup.Text>
+                <Form.Control
+                  type="email"
+                  placeholder="Enter your email"
+                  value={forgotEmail}
+                  onChange={(e) => setForgotEmail(e.target.value)}
+                  onKeyPress={(event) => event.key === 'Enter' && handleForgotPasswordSubmit()}
+                  required
+                  autoFocus
+                />
+              </InputGroup>
+              <Form.Text className="text-muted">
+                We’ll send you a link to reset your password.
+              </Form.Text>
+            </Form.Group>
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleForgotModalClose} disabled={loading}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleForgotPasswordSubmit} disabled={loading}>
+            {loading ? (
+              <>
+                <i className="bi bi-arrow-repeat me-2" style={{ animation: 'spin 1s linear infinite' }}></i>
+                Sending...
+              </>
+            ) : (
+              <>
+                <i className="bi bi-send-fill me-2"></i>
+                Send Reset Link
+              </>
+            )}
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      <style jsx>{`
+        .login-background {
+          background: rgba(255, 255, 255, 0.95);
+        }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        .card {
+          border: none;
+          border-radius: 15px;
+          background: rgba(255, 255, 255, 0.95);
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+      `}</style>
     </Container>
   );
 };

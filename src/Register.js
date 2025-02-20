@@ -1,19 +1,35 @@
 import React, { useState } from 'react';
 import { getAuth, createUserWithEmailAndPassword } from 'firebase/auth';
 import { useNavigate } from 'react-router-dom';
-import { TextField, Button, Typography, Box, Container, Paper } from '@mui/material';
+import { Container, Card, Form, Button, InputGroup, Alert } from 'react-bootstrap'; // Removed unused Row, Col imports
 import { Link } from 'react-router-dom';
 import logo from './logo/logo.png';
 
 const Register = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [notification, setNotification] = useState({ open: false, message: '', severity: 'info' });
   const navigate = useNavigate();
 
   const handleRegister = async () => {
-    if (!email || !password) {
-      alert('Please fill in all fields');
+    if (!email || !password || !confirmPassword) {
+      setNotification({
+        open: true,
+        message: 'Please fill in all fields.',
+        severity: 'warning',
+      });
+      return;
+    }
+
+    if (password !== confirmPassword) {
+      setNotification({
+        open: true,
+        message: 'Passwords do not match.',
+        severity: 'warning',
+      });
       return;
     }
 
@@ -21,110 +37,157 @@ const Register = () => {
     const auth = getAuth();
     try {
       await createUserWithEmailAndPassword(auth, email, password);
-      navigate('/login');
+      setNotification({
+        open: true,
+        message: 'Registration successful! Redirecting to login...',
+        severity: 'success',
+      });
+      setTimeout(() => navigate('/login'), 1500);
     } catch (error) {
-      alert(error.message);
+      setNotification({
+        open: true,
+        message: error.message,
+        severity: 'danger',
+      });
     } finally {
       setLoading(false);
     }
   };
 
+  const handleKeyPress = (event) => {
+    if (event.key === 'Enter') {
+      handleRegister();
+    }
+  };
+
+  const closeNotification = () => {
+    setNotification({ ...notification, open: false });
+  };
+
+  const togglePasswordVisibility = () => {
+    setShowPassword(!showPassword);
+  };
+
   return (
-    <Container component="main" maxWidth="xs">
-      <Box
-        sx={{
-          marginTop: 8,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-        }}
-      >
-        <Paper 
-          elevation={3}
-          sx={{
-            padding: 4,
-            display: 'flex',
-            flexDirection: 'column',
-            alignItems: 'center',
-            width: '100%',
-          }}
-        >
-          <Box
-            sx={{
-              mb: 3,
-              display: 'flex',
-              flexDirection: 'column',
-              alignItems: 'center',
-            }}
-          >
-            <img
-              src={logo}
-              alt="Perfect Researchers Logo"
-              style={{
-                height: '60px',
-                marginBottom: '1rem'
-              }}
-            />
-            <Typography component="h1" variant="h5" sx={{ fontWeight: 600 }}>
-              Create an Account
-            </Typography>
-          </Box>
+    <Container fluid className="d-flex align-items-center justify-content-center min-vh-100 register-background">
+      <Card className="shadow-lg" style={{ maxWidth: '500px', width: '100%' }}>
+        <Card.Body className="p-5">
+          <div className="text-center mb-4">
+            <img src={logo} alt="Perfect Researchers Logo" style={{ height: '70px', marginBottom: '1.5rem' }} />
+            <h3 className="fw-bold">Create an Account</h3>
+            <p className="text-muted">Join Perfect Researchers today</p>
+          </div>
 
-          <TextField
-            margin="normal"
-            required
-            fullWidth
-            label="Email Address"
-            autoComplete="email"
-            autoFocus
-            value={email}
-            onChange={(e) => setEmail(e.target.value)}
-            sx={{ mb: 2 }}
-          />
+          {notification.open && (
+            <Alert variant={notification.severity} onClose={closeNotification} dismissible className="mb-4">
+              {notification.message}
+            </Alert>
+          )}
 
-          <TextField
-            margin="normal"
-            required
-            fullWidth
-            label="Password"
-            type="password"
-            autoComplete="new-password"
-            value={password}
-            onChange={(e) => setPassword(e.target.value)}
-            sx={{ mb: 3 }}
-          />
+          <Form>
+            <Form.Group className="mb-3" controlId="formEmail">
+              <Form.Label>Email Address</Form.Label>
+              <InputGroup>
+                <InputGroup.Text>
+                  <i className="bi bi-envelope-fill"></i>
+                </InputGroup.Text>
+                <Form.Control
+                  type="email"
+                  placeholder="Enter email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  required
+                  autoFocus
+                />
+              </InputGroup>
+            </Form.Group>
 
-          <Button
-            fullWidth
-            variant="contained"
-            onClick={handleRegister}
-            disabled={loading}
-            sx={{
-              mb: 2,
-              py: 1.5,
-              backgroundColor: '#1976d2',
-              '&:hover': {
-                backgroundColor: '#115293',
-              },
-            }}
-          >
-            {loading ? 'Creating Account...' : 'Register'}
-          </Button>
+            <Form.Group className="mb-3" controlId="formPassword">
+              <Form.Label>Password</Form.Label>
+              <InputGroup>
+                <InputGroup.Text>
+                  <i className="bi bi-lock-fill"></i>
+                </InputGroup.Text>
+                <Form.Control
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Enter password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  required
+                />
+                <Button
+                  variant="outline-secondary"
+                  onClick={togglePasswordVisibility}
+                  style={{ borderLeft: 'none' }}
+                >
+                  <i className={`bi ${showPassword ? 'bi-eye-slash-fill' : 'bi-eye-fill'}`}></i>
+                </Button>
+              </InputGroup>
+            </Form.Group>
 
-          <Box sx={{ mt: 1 }}>
-            <Link 
-              to="/login"
-              style={{
-                textDecoration: 'none',
-                color: '#1976d2',
-                fontWeight: 500
-              }}
+            <Form.Group className="mb-3" controlId="formConfirmPassword">
+              <Form.Label>Confirm Password</Form.Label>
+              <InputGroup>
+                <InputGroup.Text>
+                  <i className="bi bi-lock-fill"></i>
+                </InputGroup.Text>
+                <Form.Control
+                  type={showPassword ? 'text' : 'password'}
+                  placeholder="Confirm password"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onKeyPress={handleKeyPress}
+                  required
+                />
+              </InputGroup>
+            </Form.Group>
+
+            <Button
+              variant="primary"
+              size="lg"
+              className="w-100 mb-3"
+              onClick={handleRegister}
+              disabled={loading}
             >
-              Already have an account? Sign in
-            </Link>
-          </Box>
-        </Paper>
-      </Box>
+              {loading ? (
+                <>
+                  <i className="bi bi-arrow-repeat me-2" style={{ animation: 'spin 1s linear infinite' }}></i>
+                  Creating Account...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-person-plus-fill me-2"></i>
+                  Register
+                </>
+              )}
+            </Button>
+
+            <div className="text-center">
+              <Link to="/login" className="text-primary text-decoration-none fw-medium">
+                Already have an account? Sign in
+              </Link>
+            </div>
+          </Form>
+        </Card.Body>
+      </Card>
+
+      <style jsx>{`
+        .register-background {
+          background: rgba(255, 255, 255, 0.95);
+        }
+        @keyframes spin {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+        .card {
+          border: none;
+          border-radius: 15px;
+          background: rgba(255, 255, 255, 0.95);
+          box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+      `}</style>
     </Container>
   );
 };

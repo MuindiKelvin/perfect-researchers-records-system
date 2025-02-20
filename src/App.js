@@ -8,6 +8,7 @@ import ProjectForm from './ProjectForm'; // Import ProjectForm component
 import Reports from './Reports'; // Import Reports component
 import Profile from './Profile'; // Import Profile component
 import EmployeeForm from './EmployeeForm'; // Import EmployeeForm component
+import Invoices from './Invoices'; // Import Invoices component
 import 'bootstrap/dist/css/bootstrap.min.css'; // Import Bootstrap styles
 
 // ProtectedRoute component to guard routes
@@ -81,6 +82,15 @@ const App = () => {
             element={
               <ProtectedRoute isAuthenticated={isAuthenticated}>
                 <Reports />
+              </ProtectedRoute>
+            }
+          />
+          {/* Invoices Route - Protected */}
+          <Route
+            path="/invoices"
+            element={
+              <ProtectedRoute isAuthenticated={isAuthenticated}>
+                <Invoices />
               </ProtectedRoute>
             }
           />
