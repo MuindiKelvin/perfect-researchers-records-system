@@ -1,10 +1,11 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Table, Button, Badge, ProgressBar, Form } from 'react-bootstrap';
+import { Container, Row, Col, Card, Table, Button, Badge, ProgressBar, Form, Dropdown, OverlayTrigger, Tooltip } from 'react-bootstrap';
 import { collection, query, orderBy, getDocs } from 'firebase/firestore';
 import { db } from './firebase';
-import { Search, Users, Briefcase, AlertCircle, CheckCircle, ChevronLeft, ChevronRight, DollarSign, Activity } from 'lucide-react';
-import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
+import { Search, Users, Briefcase, AlertCircle, CheckCircle, ChevronLeft, ChevronRight, DollarSign, Activity, PlusCircle } from 'lucide-react';
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend, PieChart, Pie, Cell } from 'recharts';
 import { useNavigate } from 'react-router-dom';
+import * as XLSX from 'xlsx';
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -16,6 +17,8 @@ const Dashboard = () => {
     pendingProjects: 0,
     overdueProjects: 0,
     totalBudget: 0,
+    dissertationCount: 0,
+    normalOrderCount: 0,
   });
 
   const [employees, setEmployees] = useState([]);
@@ -23,6 +26,13 @@ const Dashboard = () => {
   const [projectTrends, setProjectTrends] = useState([]);
   const [activityFeed, setActivityFeed] = useState([]);
   const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('All');
+  const [visibleTrendLines, setVisibleTrendLines] = useState({
+    total: true,
+    completed: true,
+    normalOrder: true,
+    dissertation: true,
+  });
 
   const [employeePage, setEmployeePage] = useState(1);
   const [projectPage, setProjectPage] = useState(1);
@@ -30,7 +40,7 @@ const Dashboard = () => {
 
   useEffect(() => {
     fetchDashboardData();
-    const interval = setInterval(() => updateActivityFeed(), 5000); // Changed to updateActivityFeed
+    const interval = setInterval(() => updateActivityFeed(), 5000);
     return () => clearInterval(interval);
   }, []);
 
@@ -41,10 +51,17 @@ const Dashboard = () => {
       const employeesSnapshot = await getDocs(employeesQuery);
       const employeesList = employeesSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 
-      const projectsRef = collection(db, 'projects');
-      const projectsQuery = query(projectsRef, orderBy('submissionDate', 'desc'));
-      const projectsSnapshot = await getDocs(projectsQuery);
-      const projectsList = projectsSnapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      const dissertationsRef = collection(db, 'dissertations');
+      const dissertationsQuery = query(dissertationsRef, orderBy('submissionDate', 'desc'));
+      const dissertationsSnapshot = await getDocs(dissertationsQuery);
+      const dissertationsList = dissertationsSnapshot.docs.map(doc => ({ id: doc.id, type: 'Dissertation', ...doc.data() }));
+
+      const normalOrdersRef = collection(db, 'normalOrders');
+      const normalOrdersQuery = query(normalOrdersRef, orderBy('submissionDate', 'desc'));
+      const normalOrdersSnapshot = await getDocs(normalOrdersQuery);
+      const normalOrdersList = normalOrdersSnapshot.docs.map(doc => ({ id: doc.id, type: 'NormalOrder', ...doc.data() }));
+
+      const projectsList = [...dissertationsList, ...normalOrdersList];
 
       setEmployees(employeesList);
       setProjects(projectsList);
@@ -54,6 +71,8 @@ const Dashboard = () => {
       const pendingProjs = projectsList.filter(proj => proj.status === 'Pending');
       const overdueProjs = projectsList.filter(proj => new Date(proj.submissionDate) < new Date() && proj.status !== 'Completed');
       const totalBudget = projectsList.reduce((sum, proj) => sum + (proj.budget || 0), 0);
+      const dissertationCount = dissertationsList.length;
+      const normalOrderCount = normalOrdersList.length;
 
       setStats({
         totalEmployees: employeesList.length,
@@ -63,45 +82,51 @@ const Dashboard = () => {
         pendingProjects: pendingProjs.length,
         overdueProjects: overdueProjs.length,
         totalBudget,
+        dissertationCount,
+        normalOrderCount,
       });
 
       setProjectTrends(generateTrendsData(projectsList));
-      setActivityFeed(generateInitialActivityFeed(projectsList, employeesList)); // Set initial feed
+      setActivityFeed(generateInitialActivityFeed(projectsList, employeesList));
     } catch (error) {
       console.error('Error fetching dashboard data:', error);
     }
   };
 
-  const generateTrendsData = (projects) => {
+    const generateTrendsData = (projects) => {
     const months = [];
     const today = new Date();
+    
     for (let i = 5; i >= 0; i--) {
       const date = new Date(today.getFullYear(), today.getMonth() - i, 1);
       months.push({
-        name: date.toLocaleString('default', { month: 'short' }),
+        name: `${date.toLocaleString('default', { month: 'short' })}-${date.getFullYear()}`,
         completed: 0,
         total: 0,
-        normalType: 0,
-        dissertationType: 0,
+        normalOrder: 0,
+        dissertation: 0,
       });
     }
 
     projects.forEach(project => {
       const projectDate = new Date(project.submissionDate);
-      const monthIndex = months.findIndex(m => m.name === projectDate.toLocaleString('default', { month: 'short' }));
+      const monthYear = `${projectDate.toLocaleString('default', { month: 'short' })}-${projectDate.getFullYear()}`;
+      const monthIndex = months.findIndex(m => m.name === monthYear);
+      
       if (monthIndex !== -1) {
         months[monthIndex].total++;
         if (project.status === 'Completed') months[monthIndex].completed++;
-        if (project.type === 'Normal') months[monthIndex].normalType++;
-        else if (project.type === 'Dissertation') months[monthIndex].dissertationType++;
+        if (project.type === 'NormalOrder') months[monthIndex].normalOrder++;
+        else if (project.type === 'Dissertation') months[monthIndex].dissertation++;
       }
     });
+    
     return months;
   };
 
   const generateInitialActivityFeed = (projList, empList) => {
     const recentProjects = projList.slice(0, Math.min(3, projList.length)).map(proj => ({
-      text: `Project "${proj.projectName}" marked as ${proj.status}`,
+      text: `${proj.type} "${proj.projectName}" marked as ${proj.status}`,
       time: new Date(proj.submissionDate).toLocaleTimeString(),
       timestamp: new Date(proj.submissionDate).getTime(),
     }));
@@ -113,10 +138,9 @@ const Dashboard = () => {
     }));
 
     const combined = [...recentProjects, ...recentEmployees]
-      .sort((a, b) => b.timestamp - a.timestamp) // Sort by timestamp descending
+      .sort((a, b) => b.timestamp - a.timestamp)
       .slice(0, 5);
 
-    // Ensure at least 5 entries with fallback
     while (combined.length < 5) {
       combined.push({
         text: 'System: Dashboard initialized',
@@ -129,23 +153,53 @@ const Dashboard = () => {
   };
 
   const updateActivityFeed = () => {
-    // Simulate new activity by occasionally adding a new entry
     const newActivity = {
       text: `System: Checked project status (${new Date().toLocaleTimeString()})`,
       time: new Date().toLocaleTimeString(),
       timestamp: Date.now(),
     };
 
-    setActivityFeed(prev => {
-      const updated = [newActivity, ...prev.slice(0, 4)]; // Keep latest 5, add new at top
-      return updated;
-    });
+    setActivityFeed(prev => [newActivity, ...prev.slice(0, 4)]);
+  };
+
+  const exportSummary = () => {
+    const summaryData = [
+      {
+        'Total Writers': stats.totalEmployees,
+        'Active Writers': stats.activeEmployees,
+        'Total Projects': stats.totalProjects,
+        'Dissertations': stats.dissertationCount,
+        'Normal Orders': stats.normalOrderCount,
+        'Completed Projects': stats.completedProjects,
+        'Pending Projects': stats.pendingProjects,
+        'Overdue Projects': stats.overdueProjects,
+        'Total Budget': stats.totalBudget.toLocaleString(),
+        'Completion Rate': stats.totalProjects ? `${Math.round((stats.completedProjects / stats.totalProjects) * 100)}%` : '0%',
+      },
+      ...projects.map(project => ({
+        'Project Name': project.projectName,
+        'Type': project.type,
+        'Supervisor': project.supervisorName,
+        'Status': project.status,
+        'Budget': project.budget ? `Ksh.${project.budget.toLocaleString()}` : '0',
+        'Submission Date': new Date(project.submissionDate).toLocaleDateString(),
+      })),
+    ];
+
+    const workbook = XLSX.utils.book_new();
+    const worksheet = XLSX.utils.json_to_sheet(summaryData);
+    worksheet['!cols'] = [
+      { wch: 20 }, { wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 15 },
+      { wch: 15 }, { wch: 15 }, { wch: 15 }, { wch: 20 }, { wch: 15 }
+    ];
+    XLSX.utils.book_append_sheet(workbook, worksheet, 'Dashboard Summary');
+    XLSX.writeFile(workbook, `Dashboard_Summary_${new Date().toISOString().split('T')[0]}.xlsx`);
   };
 
   const budgetData = [
-    { name: 'Completed', value: projects.filter(p => p.status === 'Completed').reduce((sum, p) => sum + p.budget, 0) },
-    { name: 'In Progress', value: projects.filter(p => p.status === 'In Progress').reduce((sum, p) => sum + p.budget, 0) },
-    { name: 'Pending', value: projects.filter(p => p.status === 'Pending').reduce((sum, p) => sum + p.budget, 0) },
+    { name: 'Completed', value: projects.filter(p => p.status === 'Completed').reduce((sum, p) => sum + (p.budget || 0), 0) },
+    { name: 'In Progress', value: projects.filter(p => p.status === 'In Progress').reduce((sum, p) => sum + (p.budget || 0), 0) },
+    { name: 'Pending', value: projects.filter(p => p.status === 'Pending').reduce((sum, p) => sum + (p.budget || 0), 0) },
   ];
 
   const COLORS = ['#28a745', '#ffc107', '#17a2b8'];
@@ -154,16 +208,31 @@ const Dashboard = () => {
     emp.employeeName.toLowerCase().includes(searchTerm.toLowerCase()) ||
     emp.position.toLowerCase().includes(searchTerm.toLowerCase())
   );
-  const filteredProjects = projects.filter(proj =>
-    proj.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    proj.supervisorName.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+
+  const isCurrentMonth = (date) => {
+    const today = new Date();
+    const projectDate = new Date(date);
+    return projectDate.getFullYear() === today.getFullYear() && projectDate.getMonth() === today.getMonth();
+  };
+
+  const filteredProjects = projects
+    .filter(proj =>
+      (proj.projectName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+       proj.supervisorName.toLowerCase().includes(searchTerm.toLowerCase())) &&
+      (statusFilter === 'All' || proj.status === statusFilter) &&
+      isCurrentMonth(proj.submissionDate)
+    )
+    .sort((a, b) => new Date(b.submissionDate).getTime() - new Date(a.submissionDate).getTime());
 
   const currentEmployees = filteredEmployees.slice((employeePage - 1) * recordsPerPage, employeePage * recordsPerPage);
   const currentProjects = filteredProjects.slice((projectPage - 1) * recordsPerPage, projectPage * recordsPerPage);
 
   const totalEmployeePages = Math.ceil(filteredEmployees.length / recordsPerPage);
   const totalProjectPages = Math.ceil(filteredProjects.length / recordsPerPage);
+
+  const toggleTrendLine = (key) => {
+    setVisibleTrendLines(prev => ({ ...prev, [key]: !prev[key] }));
+  };
 
   return (
     <Container fluid className="py-5">
@@ -173,14 +242,19 @@ const Dashboard = () => {
             <Card.Body>
               <Card.Title className="d-flex justify-content-between align-items-center">
                 Dashboard Overview
-                <Form.Control
-                  type="text"
-                  placeholder="Search dashboard..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  style={{ width: '250px' }}
-                  className="ms-auto"
-                />
+                <div className="d-flex align-items-center">
+                  <Form.Control
+                    type="text"
+                    placeholder="Search dashboard..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    style={{ width: '250px' }}
+                    className="me-2"
+                  />
+                  <Button variant="outline-primary" onClick={exportSummary}>
+                    Export Summary
+                  </Button>
+                </div>
               </Card.Title>
             </Card.Body>
           </Card>
@@ -190,14 +264,14 @@ const Dashboard = () => {
       {/* Stats Overview with Interactive Widgets */}
       <Row className="mb-4">
         <Col md={3} className="mb-4">
-          <Card className="h-100 shadow-sm hover-card" onClick={() => navigate('/employees')}>
+          <Card className="h-100 shadow-sm hover-card bg-primary text-white" onClick={() => navigate('/employees')}>
             <Card.Body>
               <div className="d-flex align-items-center">
-                <div className="bg-primary bg-opacity-10 p-3 rounded-circle me-3">
-                  <i className="bi bi-people-fill text-primary" style={{ fontSize: '1.5rem' }}></i>
+                <div className="bg-primary-subtle p-3 rounded-circle me-3">
+                  <Users size={24} className="text-primary" />
                 </div>
                 <div>
-                  <h6 className="text-muted mb-1">Total Writers</h6>
+                  <h6 className="mb-1">Total Writers</h6>
                   <h3 className="mb-0">{stats.totalEmployees}</h3>
                   <ProgressBar
                     now={(stats.activeEmployees / stats.totalEmployees) * 100 || 0}
@@ -213,22 +287,18 @@ const Dashboard = () => {
         </Col>
 
         <Col md={3} className="mb-4">
-          <Card className="h-100 shadow-sm hover-card" onClick={() => navigate('/projects')}>
+          <Card className="h-100 shadow-sm hover-card bg-success text-white" onClick={() => navigate('/projects')}>
             <Card.Body>
               <div className="d-flex align-items-center">
-                <div className="bg-success bg-opacity-10 p-3 rounded-circle me-3">
-                  <i className="bi bi-folder-fill text-success" style={{ fontSize: '1.5rem' }}></i>
+                <div className="bg-success-subtle p-3 rounded-circle me-3">
+                  <Briefcase size={24} className="text-success" />
                 </div>
                 <div>
-                  <h6 className="text-muted mb-1">Total Projects</h6>
+                  <h6 className="mb-1">Total Projects</h6>
                   <h3 className="mb-0">{stats.totalProjects}</h3>
-                  <ProgressBar
-                    now={(stats.completedProjects / stats.totalProjects) * 100 || 0}
-                    variant="info"
-                    label={`${stats.completedProjects} Done`}
-                    className="mt-2"
-                    style={{ height: '10px' }}
-                  />
+                  <small className="text-white">
+                    Dissertations: {stats.dissertationCount} | Normal Orders: {stats.normalOrderCount}
+                  </small>
                 </div>
               </div>
             </Card.Body>
@@ -236,16 +306,31 @@ const Dashboard = () => {
         </Col>
 
         <Col md={3} className="mb-4">
-          <Card className="h-100 shadow-sm hover-card" onClick={() => navigate('/projects')}>
+          <Card className="h-100 shadow-sm hover-card bg-warning text-dark" onClick={() => navigate('/projects')}>
             <Card.Body>
               <div className="d-flex align-items-center">
-                <div className="bg-warning bg-opacity-10 p-3 rounded-circle me-3">
-                  <i className="bi bi-exclamation-triangle-fill text-warning" style={{ fontSize: '1.5rem' }}></i>
+                <div className="bg-warning-subtle p-3 rounded-circle me-3">
+                  <AlertCircle size={24} className="text-warning" />
                 </div>
                 <div>
-                  <h6 className="text-muted mb-1">Pending Projects</h6>
+                  <h6 className="mb-1">Pending Projects</h6>
                   <h3 className="mb-0">{stats.pendingProjects}</h3>
-                  <small className="text-danger">Overdue: {stats.overdueProjects}</small>
+                  <OverlayTrigger
+                    placement="top"
+                    overlay={<Tooltip>View overdue projects</Tooltip>}
+                  >
+                    <Badge
+                      bg="danger"
+                      className="cursor-pointer"
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setStatusFilter('Pending');
+                        setProjectPage(1);
+                      }}
+                    >
+                      Overdue: {stats.overdueProjects}
+                    </Badge>
+                  </OverlayTrigger>
                 </div>
               </div>
             </Card.Body>
@@ -253,14 +338,14 @@ const Dashboard = () => {
         </Col>
 
         <Col md={3} className="mb-4">
-          <Card className="h-100 shadow-sm">
+          <Card className="h-100 shadow-sm bg-info text-white">
             <Card.Body>
               <div className="d-flex align-items-center">
-                <div className="bg-info bg-opacity-10 p-3 rounded-circle me-3">
-                  <i className="bi bi-check-circle-fill text-info" style={{ fontSize: '1.5rem' }}></i>
+                <div className="bg-info-subtle p-3 rounded-circle me-3">
+                  <CheckCircle size={24} className="text-info" />
                 </div>
                 <div>
-                  <h6 className="text-muted mb-1">Completion Rate</h6>
+                  <h6 className="mb-1">Completion Rate</h6>
                   <h3 className="mb-0">
                     {stats.totalProjects ? Math.round((stats.completedProjects / stats.totalProjects) * 100) : 0}%
                   </h3>
@@ -279,7 +364,21 @@ const Dashboard = () => {
         <Col md={8}>
           <Card className="shadow-sm">
             <Card.Body>
-              <Card.Title>Project Trends</Card.Title>
+              <Card.Title className="d-flex justify-content-between align-items-center">
+                Project Trends
+                <div>
+                  {['total', 'completed', 'normalOrder', 'dissertation'].map(key => (
+                    <Form.Check
+                      key={key}
+                      inline
+                      type="checkbox"
+                      label={key.charAt(0).toUpperCase() + key.slice(1).replace('Order', ' Order')}
+                      checked={visibleTrendLines[key]}
+                      onChange={() => toggleTrendLine(key)}
+                    />
+                  ))}
+                </div>
+              </Card.Title>
               <ResponsiveContainer width="100%" height={300}>
                 <LineChart data={projectTrends}>
                   <CartesianGrid strokeDasharray="3 3" />
@@ -287,10 +386,18 @@ const Dashboard = () => {
                   <YAxis />
                   <Tooltip />
                   <Legend />
-                  <Line type="monotone" dataKey="total" stroke="#0d6efd" name="Total Projects" strokeWidth={2} />
-                  <Line type="monotone" dataKey="completed" stroke="#28a745" name="Completed" strokeWidth={2} />
-                  <Line type="monotone" dataKey="normalType" stroke="#ffc107" name="Normal" strokeWidth={2} />
-                  <Line type="monotone" dataKey="dissertationType" stroke="#dc3545" name="Dissertation" strokeWidth={2} />
+                  {visibleTrendLines.total && (
+                    <Line type="monotone" dataKey="total" stroke="#0d6efd" name="Total Projects" strokeWidth={2} />
+                  )}
+                  {visibleTrendLines.completed && (
+                    <Line type="monotone" dataKey="completed" stroke="#28a745" name="Completed" strokeWidth={2} />
+                  )}
+                  {visibleTrendLines.normalOrder && (
+                    <Line type="monotone" dataKey="normalOrder" stroke="#ffc107" name="Normal Order" strokeWidth={2} />
+                  )}
+                  {visibleTrendLines.dissertation && (
+                    <Line type="monotone" dataKey="dissertation" stroke="#dc3545" name="Dissertation" strokeWidth={2} />
+                  )}
                 </LineChart>
               </ResponsiveContainer>
             </Card.Body>
@@ -339,7 +446,7 @@ const Dashboard = () => {
                       <tr key={index}>
                         <td>
                           <div className="d-flex align-items-center">
-                            <i className="bi bi-activity text-primary me-2" style={{ fontSize: '1.2rem' }}></i>
+                            <Activity size={18} className="text-primary me-2" />
                             <div>
                               <span>{activity.text}</span>
                               <small className="text-muted d-block">{activity.time}</small>
@@ -404,32 +511,49 @@ const Dashboard = () => {
         <Col lg={4} className="mb-4">
           <Card className="shadow-sm">
             <Card.Body>
-              <Card.Title>Recent Projects</Card.Title>
-              <Table responsive borderless>
-                <tbody>
-                  {currentProjects.map(project => (
-                    <tr key={project.id}>
-                      <td>
-                        <div className="d-flex flex-column">
-                          <span className="fw-bold">{project.projectName}</span>
-                          <small className="text-muted">{project.supervisorName}</small>
-                        </div>
-                      </td>
-                      <td className="text-end">
-                        <Badge
-                          bg={
-                            project.status === 'Completed' ? 'success' :
-                            project.status === 'In Progress' ? 'warning' :
-                            'primary'
-                          }
-                        >
-                          {project.status}
-                        </Badge>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </Table>
+              <Card.Title className="d-flex justify-content-between align-items-center">
+                Recent Projects (This Month)
+                <Form.Select
+                  value={statusFilter}
+                  onChange={(e) => setStatusFilter(e.target.value)}
+                  style={{ width: '150px' }}
+                >
+                  <option value="All">All Statuses</option>
+                  <option value="Completed">Completed</option>
+                  <option value="In Progress">In Progress</option>
+                  <option value="Pending">Pending</option>
+                </Form.Select>
+              </Card.Title>
+              {filteredProjects.length > 0 ? (
+                <Table responsive borderless>
+                  <tbody>
+                    {currentProjects.map(project => (
+                      <tr key={project.id}>
+                        <td>
+                          <div className="d-flex flex-column">
+                            <span className="fw-bold">{project.projectName} ({project.type})</span>
+                            <small className="text-muted">{project.supervisorName}</small>
+                          </div>
+                        </td>
+                        <td className="text-end">
+                          <Badge
+                            bg={
+                              project.status === 'Completed' ? 'success' :
+                              project.status === 'In Progress' ? 'warning' :
+                              'primary'
+                            }
+                          >
+                            {project.status}
+                          </Badge>
+                          <small className="text-muted d-block">{new Date(project.submissionDate).toLocaleDateString()}</small>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </Table>
+              ) : (
+                <p className="text-muted">No projects found for this month.</p>
+              )}
               <div className="d-flex justify-content-between align-items-center mt-3">
                 <Button
                   variant="outline-secondary"
@@ -454,10 +578,26 @@ const Dashboard = () => {
         </Col>
       </Row>
 
+      {/* Quick Action Button */}
+      <Dropdown className="position-fixed bottom-0 end-0 m-4">
+        <Dropdown.Toggle variant="primary" id="quick-actions" className="rounded-circle p-3">
+          <PlusCircle size={24} />
+        </Dropdown.Toggle>
+        <Dropdown.Menu align="end">
+          <Dropdown.Item onClick={() => navigate('/projects/normal-orders')}>New Normal Order</Dropdown.Item>
+          <Dropdown.Item onClick={() => navigate('/projects/dissertations')}>New Dissertation</Dropdown.Item>
+          <Dropdown.Item onClick={() => navigate('/employees')}>Add Writer</Dropdown.Item>
+          <Dropdown.Item onClick={() => navigate('/invoices')}>Generate Invoice</Dropdown.Item>
+        </Dropdown.Menu>
+      </Dropdown>
+
       <style>{`
         .hover-card:hover {
           transform: scale(1.03);
           transition: transform 0.2s ease-in-out;
+          cursor: pointer;
+        }
+        .cursor-pointer {
           cursor: pointer;
         }
       `}</style>

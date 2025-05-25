@@ -6,11 +6,19 @@ import { auth } from './firebase';
 import logo from './logo/logo.png';
 
 const menuItems = [
-  { path: '/dashboard', name: 'Dashboard', icon: 'bi-speedometer2' }, // Updated icon for dashboard
-  { path: '/projects', name: 'Projects', icon: 'bi-folder-fill' }, // Updated icon for projects
-  { path: '/employees', name: 'Writers', icon: 'bi-person-lines-fill' }, // Updated icon for writers
-  { path: '/invoices', name: 'Invoices', icon: 'bi-receipt-cutoff' }, // Updated icon for invoices
-  { path: '/reports', name: 'Reports', icon: 'bi-graph-up' }, // Updated icon for reports
+  { path: '/dashboard', name: 'Dashboard', icon: 'bi-speedometer2' },
+  { 
+    path: '/projects', 
+    name: 'Projects', 
+    icon: 'bi-folder-fill',
+    subItems: [
+      { path: '/projects/normal-orders', name: 'Normal Orders', icon: 'bi-file-earmark-text' },
+      { path: '/projects/dissertations', name: 'Dissertations', icon: 'bi-book' }
+    ]
+  },
+  { path: '/employees', name: 'Writers', icon: 'bi-person-lines-fill' },
+  { path: '/invoices', name: 'Invoices', icon: 'bi-receipt-cutoff' },
+  { path: '/reports', name: 'Reports', icon: 'bi-graph-up' },
   { path: '/profile', name: 'Profile', icon: 'bi-person-circle' },
 ];
 
@@ -18,8 +26,8 @@ const Sidebar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
-  const [darkTheme, setDarkTheme] = useState(true); // Theme toggle state
-  const [showToolsSubMenu, setShowToolsSubMenu] = useState(false); // Submenu state for tools
+  const [darkTheme, setDarkTheme] = useState(true);
+  const [showProjectsSubMenu, setShowProjectsSubMenu] = useState(false);
 
   const handleLogout = async () => {
     try {
@@ -80,28 +88,56 @@ const Sidebar = () => {
         {/* Navigation Items */}
         <Nav className="flex-column flex-grow-1 py-3">
           {menuItems.map((item) => (
-            <OverlayTrigger
-              key={item.path}
-              placement="right"
-              overlay={!expanded ? renderTooltip(item.name) : <BootstrapTooltip id="dummy" />}
-              delay={{ show: 250, hide: 400 }}
-            >
-              <Nav.Link
-                as={Link}
-                to={item.path}
-                className={`px-3 py-2 d-flex align-items-center
-                  ${location.pathname === item.path ? 'bg-primary text-white' : darkTheme ? 'text-white-50' : 'text-dark'}
-                  ${expanded ? '' : 'justify-content-center'}
-                  hover-highlight`}
-                style={{ cursor: 'pointer' }}
+            <div key={item.path}>
+              <OverlayTrigger
+                placement="right"
+                overlay={!expanded ? renderTooltip(item.name) : <BootstrapTooltip id="dummy" />}
+                delay={{ show: 250, hide: 400 }}
               >
-                <i className={`${item.icon} ${expanded ? 'me-2' : ''}`} style={{ fontSize: '1.3rem' }}></i>
-                {expanded && <span>{item.name}</span>}
-              </Nav.Link>
-            </OverlayTrigger>
+                <Nav.Link
+                  as={Link}
+                  to={item.path}
+                  className={`px-3 py-2 d-flex align-items-center
+                    ${location.pathname === item.path ? 'bg-primary text-white' : darkTheme ? 'text-white-50' : 'text-dark'}
+                    ${expanded ? '' : 'justify-content-center'}
+                    hover-highlight`}
+                  style={{ cursor: 'pointer' }}
+                  onClick={() => item.subItems && setShowProjectsSubMenu(!showProjectsSubMenu)}
+                >
+                  <i className={`${item.icon} ${expanded ? 'me-2' : ''}`} style={{ fontSize: '1.3rem' }}></i>
+                  {expanded && <span>{item.name}</span>}
+                  {expanded && item.subItems && (
+                    <i className={`ms-auto bi ${showProjectsSubMenu ? 'bi-chevron-down' : 'bi-chevron-right'}`}></i>
+                  )}
+                </Nav.Link>
+              </OverlayTrigger>
+              {item.subItems && showProjectsSubMenu && expanded && (
+                <Nav className="flex-column ms-3">
+                  {item.subItems.map((subItem) => (
+                    <OverlayTrigger
+                      key={subItem.path}
+                      placement="right"
+                      overlay={!expanded ? renderTooltip(subItem.name) : <BootstrapTooltip id="dummy" />}
+                      delay={{ show: 250, hide: 400 }}
+                    >
+                      <Nav.Link
+                        as={Link}
+                        to={subItem.path}
+                        className={`px-3 py-1 d-flex align-items-center
+                          ${location.pathname === subItem.path ? 'bg-primary text-white' : darkTheme ? 'text-white-50' : 'text-dark'}
+                          hover-highlight`}
+                        style={{ cursor: 'pointer', fontSize: '0.9rem' }}
+                      >
+                        <i className={`${subItem.icon} me-2`} style={{ fontSize: '1.1rem' }}></i>
+                        {expanded && <span>{subItem.name}</span>}
+                      </Nav.Link>
+                    </OverlayTrigger>
+                  ))}
+                </Nav>
+              )}
+            </div>
           ))}
-
-      </Nav>
+        </Nav>
 
         {/* User Info & Theme Toggle */}
         <div className={`p-3 border-top ${darkTheme ? 'border-secondary' : 'border-light'}`}>

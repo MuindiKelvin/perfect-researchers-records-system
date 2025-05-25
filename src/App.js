@@ -5,6 +5,8 @@ import Login from './Login'; // Import Login component
 import Register from './Register'; // Import Register component
 import Dashboard from './Dashboard'; // Import Dashboard component
 import ProjectForm from './ProjectForm'; // Import ProjectForm component
+import NormalOrders from './NormalOrders'; // Import NormalOrders component
+import Dissertations from './Dissertations'; // Import Dissertations component
 import Reports from './Reports'; // Import Reports component
 import Profile from './Profile'; // Import Profile component
 import EmployeeForm from './EmployeeForm'; // Import EmployeeForm component
@@ -64,6 +66,24 @@ const App = () => {
             element={
               <ProtectedRoute isAuthenticated={isAuthenticated}>
                 <ProjectForm />
+              </ProtectedRoute>
+            }
+          />
+          {/* Normal Orders Route - Protected */}
+          <Route
+            path="/projects/normal-orders"
+            element={
+              <ProtectedRoute isAuthenticated={isAuthenticated}>
+                <NormalOrders />
+              </ProtectedRoute>
+            }
+          />
+          {/* Dissertations Route - Protected */}
+          <Route
+            path="/projects/dissertations"
+            element={
+              <ProtectedRoute isAuthenticated={isAuthenticated}>
+                <Dissertations />
               </ProtectedRoute>
             }
           />

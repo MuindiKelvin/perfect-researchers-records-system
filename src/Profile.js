@@ -1,27 +1,29 @@
 import React, { useState, useEffect } from 'react';
-import { Button, Form, Container, Alert, Card, InputGroup, ProgressBar, Badge, Modal, Row, Col } from 'react-bootstrap'; // Added Row, Col imports
-import { getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider } from 'firebase/auth';
-import { Eye, EyeOff, Upload } from 'lucide-react'; // Replaced EyeSlash with EyeOff
+import {
+  Button, Form, Container, Alert, Card, InputGroup, ProgressBar, Badge, Row, Col
+} from 'react-bootstrap';
+import {
+  getAuth, updatePassword, reauthenticateWithCredential, EmailAuthProvider
+} from 'firebase/auth';
+import { Eye, EyeOff } from 'lucide-react';
 
 const Profile = () => {
   const [adminProfile, setAdminProfile] = useState({
     currentPassword: '',
     newPassword: '',
     confirmPassword: '',
-    profilePicture: null,
-    displayName: '', // Added for display name editing
+    displayName: '',
   });
   const [notification, setNotification] = useState({ message: '', variant: '' });
   const [showPassword, setShowPassword] = useState({ current: false, new: false, confirm: false });
   const [passwordStrength, setPasswordStrength] = useState(0);
   const [darkMode, setDarkMode] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [showPictureModal, setShowPictureModal] = useState(false);
+
   const auth = getAuth();
   const user = auth.currentUser;
 
   useEffect(() => {
-    // Load dark mode preference and user data
     const savedMode = localStorage.getItem('darkMode');
     if (savedMode) setDarkMode(JSON.parse(savedMode));
     if (user?.displayName) {
@@ -98,15 +100,6 @@ const Profile = () => {
     }
   };
 
-  const handlePictureUpload = (event) => {
-    const file = event.target.files[0];
-    if (file) {
-      setAdminProfile(prev => ({ ...prev, profilePicture: URL.createObjectURL(file) }));
-      setNotification({ message: 'Profile picture preview updated. Saving not implemented.', variant: 'info' });
-      setTimeout(() => setNotification({}), 3000);
-    }
-  };
-
   const handleSaveProfile = () => {
     setNotification({ message: 'Profile settings saved (display name update not implemented).', variant: 'success' });
     setTimeout(() => setNotification({}), 3000);
@@ -138,146 +131,98 @@ const Profile = () => {
           <Badge bg="info" pill>{user?.email || 'Admin'}</Badge>
         </Card.Header>
         <Card.Body>
-          <Row className="mb-4 align-items-center">
-            <Col xs={12} md={4} className="text-center">
-              <img
-                src={adminProfile.profilePicture || 'https://via.placeholder.com/150'}
-                alt="Profile"
-                className="rounded-circle mb-3"
-                style={{ width: '150px', height: '150px', objectFit: 'cover', border: darkMode ? '2px solid #fff' : '2px solid #000' }}
+          <Form>
+            <Form.Group className="mb-3" controlId="formDisplayName">
+              <Form.Label>Display Name</Form.Label>
+              <InputGroup>
+                <InputGroup.Text><i className="bi bi-person-fill"></i></InputGroup.Text>
+                <Form.Control
+                  type="text"
+                  value={adminProfile.displayName}
+                  onChange={(e) => handleInputChange('displayName', e.target.value)}
+                  placeholder="Enter display name"
+                  disabled={loading}
+                />
+              </InputGroup>
+            </Form.Group>
+
+            <Form.Group className="mb-3" controlId="formCurrentPassword">
+              <Form.Label>Current Password</Form.Label>
+              <InputGroup>
+                <InputGroup.Text><i className="bi bi-lock-fill"></i></InputGroup.Text>
+                <Form.Control
+                  type={showPassword.current ? 'text' : 'password'}
+                  value={adminProfile.currentPassword}
+                  onChange={(e) => handleInputChange('currentPassword', e.target.value)}
+                  placeholder="Enter current password"
+                  disabled={loading}
+                />
+                <Button variant="outline-secondary" onClick={() => togglePasswordVisibility('current')}>
+                  {showPassword.current ? <EyeOff size={20} /> : <Eye size={20} />}
+                </Button>
+              </InputGroup>
+            </Form.Group>
+
+            <Form.Group className="mb-3" controlId="formNewPassword">
+              <Form.Label>New Password</Form.Label>
+              <InputGroup>
+                <InputGroup.Text><i className="bi bi-lock-fill"></i></InputGroup.Text>
+                <Form.Control
+                  type={showPassword.new ? 'text' : 'password'}
+                  value={adminProfile.newPassword}
+                  onChange={(e) => handleInputChange('newPassword', e.target.value)}
+                  placeholder="Enter new password"
+                  disabled={loading}
+                />
+                <Button variant="outline-secondary" onClick={() => togglePasswordVisibility('new')}>
+                  {showPassword.new ? <EyeOff size={20} /> : <Eye size={20} />}
+                </Button>
+              </InputGroup>
+              <ProgressBar
+                now={passwordStrength}
+                variant={passwordStrength >= 80 ? 'success' : passwordStrength >= 60 ? 'warning' : 'danger'}
+                label={`${passwordStrength}%`}
+                className="mt-2"
+                style={{ height: '10px' }}
               />
-              <Button variant="outline-primary" size="sm" onClick={() => setShowPictureModal(true)}>
-                <Upload size={16} className="me-2" /> Change Picture
-              </Button>
-            </Col>
-            <Col xs={12} md={8}>
-              <Form>
-                <Form.Group className="mb-3" controlId="formDisplayName">
-                  <Form.Label>Display Name</Form.Label>
-                  <InputGroup>
-                    <InputGroup.Text><i className="bi bi-person-fill"></i></InputGroup.Text>
-                    <Form.Control
-                      type="text"
-                      value={adminProfile.displayName}
-                      onChange={(e) => handleInputChange('displayName', e.target.value)}
-                      placeholder="Enter display name"
-                      disabled={loading}
-                    />
-                  </InputGroup>
-                </Form.Group>
+              <Form.Text className={darkMode ? 'text-light' : 'text-muted'}>
+                Strength: {passwordStrength >= 80 ? 'Strong' : passwordStrength >= 60 ? 'Moderate' : 'Weak'}
+              </Form.Text>
+            </Form.Group>
 
-                <Form.Group className="mb-3" controlId="formCurrentPassword">
-                  <Form.Label>Current Password</Form.Label>
-                  <InputGroup>
-                    <InputGroup.Text><i className="bi bi-lock-fill"></i></InputGroup.Text>
-                    <Form.Control
-                      type={showPassword.current ? 'text' : 'password'}
-                      value={adminProfile.currentPassword}
-                      onChange={(e) => handleInputChange('currentPassword', e.target.value)}
-                      placeholder="Enter current password"
-                      disabled={loading}
-                    />
-                    <Button variant="outline-secondary" onClick={() => togglePasswordVisibility('current')}>
-                      {showPassword.current ? <EyeOff size={20} /> : <Eye size={20} />}
-                    </Button>
-                  </InputGroup>
-                </Form.Group>
-
-                <Form.Group className="mb-3" controlId="formNewPassword">
-                  <Form.Label>New Password</Form.Label>
-                  <InputGroup>
-                    <InputGroup.Text><i className="bi bi-lock-fill"></i></InputGroup.Text>
-                    <Form.Control
-                      type={showPassword.new ? 'text' : 'password'}
-                      value={adminProfile.newPassword}
-                      onChange={(e) => handleInputChange('newPassword', e.target.value)}
-                      placeholder="Enter new password"
-                      disabled={loading}
-                    />
-                    <Button variant="outline-secondary" onClick={() => togglePasswordVisibility('new')}>
-                      {showPassword.new ? <EyeOff size={20} /> : <Eye size={20} />}
-                    </Button>
-                  </InputGroup>
-                  <ProgressBar
-                    now={passwordStrength}
-                    variant={passwordStrength >= 80 ? 'success' : passwordStrength >= 60 ? 'warning' : 'danger'}
-                    label={`${passwordStrength}%`}
-                    className="mt-2"
-                    style={{ height: '10px' }}
-                  />
-                  <Form.Text className={darkMode ? 'text-light' : 'text-muted'}>
-                    Strength: {passwordStrength >= 80 ? 'Strong' : passwordStrength >= 60 ? 'Moderate' : 'Weak'}
-                  </Form.Text>
-                </Form.Group>
-
-                <Form.Group className="mb-3" controlId="formConfirmPassword">
-                  <Form.Label>Confirm New Password</Form.Label>
-                  <InputGroup>
-                    <InputGroup.Text><i className="bi bi-lock-fill"></i></InputGroup.Text>
-                    <Form.Control
-                      type={showPassword.confirm ? 'text' : 'password'}
-                      value={adminProfile.confirmPassword}
-                      onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
-                      placeholder="Confirm new password"
-                      disabled={loading}
-                    />
-                    <Button variant="outline-secondary" onClick={() => togglePasswordVisibility('confirm')}>
-                      {showPassword.confirm ? <EyeOff size={20} /> : <Eye size={20} />}
-                    </Button>
-                  </InputGroup>
-                </Form.Group>
-
-                <Button variant="primary" onClick={handlePasswordChange} disabled={loading} className="me-2">
-                  {loading ? (
-                    <>
-                      <i className="bi bi-arrow-repeat me-2" style={{ animation: 'spin 1s linear infinite' }}></i>
-                      Updating...
-                    </>
-                  ) : (
-                    <>
-                      <i className="bi bi-key-fill me-2"></i>
-                      Update Password
-                    </>
-                  )}
+            <Form.Group className="mb-3" controlId="formConfirmPassword">
+              <Form.Label>Confirm New Password</Form.Label>
+              <InputGroup>
+                <InputGroup.Text><i className="bi bi-lock-fill"></i></InputGroup.Text>
+                <Form.Control
+                  type={showPassword.confirm ? 'text' : 'password'}
+                  value={adminProfile.confirmPassword}
+                  onChange={(e) => handleInputChange('confirmPassword', e.target.value)}
+                  placeholder="Confirm new password"
+                  disabled={loading}
+                />
+                <Button variant="outline-secondary" onClick={() => togglePasswordVisibility('confirm')}>
+                  {showPassword.confirm ? <EyeOff size={20} /> : <Eye size={20} />}
                 </Button>
-                <Button variant="outline-success" onClick={handleSaveProfile} disabled={loading}>
-                  <i className="bi bi-save me-2"></i>
-                  Save Profile
-                </Button>
-              </Form>
-            </Col>
-          </Row>
+              </InputGroup>
+            </Form.Group>
+
+            <Button variant="primary" onClick={handlePasswordChange} disabled={loading} className="me-2">
+              {loading ? (
+                <>
+                  <i className="bi bi-arrow-repeat me-2" style={{ animation: 'spin 1s linear infinite' }}></i>
+                  Updating...
+                </>
+              ) : (
+                <>
+                  <i className="bi bi-key-fill me-2"></i>
+                  Update Password
+                </>
+              )}
+            </Button>
+          </Form>
         </Card.Body>
       </Card>
-
-      {/* Profile Picture Upload Modal */}
-      <Modal show={showPictureModal} onHide={() => setShowPictureModal(false)} centered>
-        <Modal.Header closeButton>
-          <Modal.Title>Change Profile Picture</Modal.Title>
-        </Modal.Header>
-        <Modal.Body>
-          <Form.Group controlId="formPictureUpload">
-            <Form.Label>Upload New Picture</Form.Label>
-            <InputGroup>
-              <Form.Control
-                type="file"
-                accept="image/*"
-                onChange={handlePictureUpload}
-                disabled={loading}
-              />
-              <InputGroup.Text><i className="bi bi-upload"></i></InputGroup.Text>
-            </InputGroup>
-            <Form.Text className={darkMode ? 'text-light' : 'text-muted'}>
-              Upload a JPG, PNG, or GIF (max 5MB). This is a preview; saving is not implemented.
-            </Form.Text>
-          </Form.Group>
-        </Modal.Body>
-        <Modal.Footer>
-          <Button variant="secondary" onClick={() => setShowPictureModal(false)} disabled={loading}>
-            Close
-          </Button>
-        </Modal.Footer>
-      </Modal>
 
       <style jsx>{`
         @keyframes spin {

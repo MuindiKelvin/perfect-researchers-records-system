@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Form, Button, Card, InputGroup, Alert, Table, Badge, Pagination } from 'react-bootstrap';
+import { Container, Form, Button, Card, InputGroup, Alert, Table, Badge, Pagination, Row, Col } from 'react-bootstrap';
 import { collection, getDocs, query, where, doc, updateDoc, addDoc, deleteDoc } from 'firebase/firestore';
 import { db } from './firebase';
 import * as XLSX from 'xlsx';
@@ -8,6 +8,7 @@ import { Search, ArrowUpDown } from 'lucide-react';
 const Invoices = () => {
   const [supervisorName, setSupervisorName] = useState('');
   const [season, setSeason] = useState('');
+  const [projectType, setProjectType] = useState('');
   const [supervisors, setSupervisors] = useState([]);
   const [seasons, setSeasons] = useState([]);
   const [projects, setProjects] = useState([]);
@@ -15,25 +16,48 @@ const Invoices = () => {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [recordsPerPage, setRecordsPerPage] = useState(5); // Now modifiable
+  const [recordsPerPage, setRecordsPerPage] = useState(5);
   const [sortColumn, setSortColumn] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
+  // State for column selection
+  const [selectedColumns, setSelectedColumns] = useState({
+    'Project Name': true,
+    'Submission Date': true,
+    'Supervisor': true,
+    'Season': true,
+    'Status': true,
+    'Type': true,
+    'Total Amount': true,
+    'Word Count': true,
+    'CPP': true,
+    'Code Price': true,
+    'Has Code': true
+  });
 
   // Fetch unique supervisors, seasons, and existing invoices on mount
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        const projectsRef = collection(db, 'projects');
-        const projectsSnapshot = await getDocs(projectsRef);
-        const supervisorSet = new Set();
-        const seasonSet = new Set();
-        projectsSnapshot.forEach(doc => {
+        const dissertationsRef = collection(db, 'dissertations');
+        const dissertationsSnapshot = await getDocs(dissertationsRef);
+        const dissertationSupervisors = new Set();
+        const dissertationSeasons = new Set();
+        dissertationsSnapshot.forEach(doc => {
           const data = doc.data();
-          supervisorSet.add(data.supervisorName);
-          seasonSet.add(data.season);
+          if (data.supervisorName) dissertationSupervisors.add(data.supervisorName);
+          if (data.season) dissertationSeasons.add(data.season);
         });
-        setSupervisors([...supervisorSet]);
-        setSeasons([...seasonSet]);
+
+        const normalOrdersRef = collection(db, 'normalOrders');
+        const normalOrdersSnapshot = await getDocs(normalOrdersRef);
+        normalOrdersSnapshot.forEach(doc => {
+          const data = doc.data();
+          if (data.supervisorName) dissertationSupervisors.add(data.supervisorName);
+          if (data.season) dissertationSeasons.add(data.season);
+        });
+
+        setSupervisors([...dissertationSupervisors]);
+        setSeasons([...dissertationSeasons]);
 
         const invoicesRef = collection(db, 'invoices');
         const invoicesSnapshot = await getDocs(invoicesRef);
@@ -49,10 +73,10 @@ const Invoices = () => {
     fetchInitialData();
   }, []);
 
-  // Fetch projects based on supervisor and season
+  // Fetch projects based on supervisor, season, and project type
   const fetchProjects = async () => {
-    if (!supervisorName || !season) {
-      setError('Please select both supervisor name and season');
+    if (!supervisorName || !season || !projectType) {
+      setError('Please select writer name, season, and project type');
       return;
     }
 
@@ -60,8 +84,9 @@ const Invoices = () => {
       setError('');
       setSuccess('');
       
+      const collectionName = projectType === 'Dissertations' ? 'dissertations' : 'normalOrders';
       const q = query(
-        collection(db, 'projects'),
+        collection(db, collectionName),
         where('supervisorName', '==', supervisorName),
         where('season', '==', season)
       );
@@ -69,20 +94,29 @@ const Invoices = () => {
       const querySnapshot = await getDocs(q);
       const projectList = querySnapshot.docs.map(doc => ({
         id: doc.id,
-        ...doc.data()
+        ...doc.data(),
+        type: projectType
       }));
 
       if (projectList.length === 0) {
-        setError('No projects found for the selected supervisor and season');
+        setError(`No ${projectType.toLowerCase()} found for the selected writer and season`);
         setProjects([]);
         return;
       }
 
       setProjects(projectList);
     } catch (error) {
-      setError('Error fetching projects: ' + error.message);
+      setError(`Error fetching ${projectType.toLowerCase()}: ` + error.message);
       setProjects([]);
     }
+  };
+
+  // Handle column selection
+  const handleColumnChange = (column) => {
+    setSelectedColumns(prev => ({
+      ...prev,
+      [column]: !prev[column]
+    }));
   };
 
   // Generate and save invoice
@@ -92,11 +126,19 @@ const Invoices = () => {
       return;
     }
 
+    // Check if at least one column is selected
+    const hasSelectedColumns = Object.values(selectedColumns).some(value => value);
+    if (!hasSelectedColumns) {
+      setError('Please select at least one column to include in the invoice');
+      return;
+    }
+
     try {
       const totalAmount = projects.reduce((sum, project) => sum + (project.budget || 0), 0);
       const invoiceData = {
         supervisorName,
         season,
+        projectType,
         totalAmount,
         projectCount: projects.length,
         isPaid: false,
@@ -107,28 +149,54 @@ const Invoices = () => {
       const newInvoice = { id: docRef.id, ...invoiceData };
       setInvoices([...invoices, newInvoice]);
 
-      const worksheetData = projects.map(project => ({
-        'Project Name': project.projectName,
-        'Submission Date': new Date(project.submissionDate).toLocaleDateString(),
-        'Supervisor': project.supervisorName,
-        'Season': project.season,
-        'Status': project.status,
-        'Type': project.type,
-        'Total Amount': `Ksh.${project.budget?.toLocaleString() ?? 0}`,
-        'Word Count': project.wordCount?.toLocaleString() ?? 0,
-        'CPP': `Ksh.${project.cpp?.toLocaleString() ?? 0}`,
-        'Code Price': `Ksh.${project.codePrice?.toLocaleString() ?? 0}`,
-        'Has Code': project.hasCode ? 'Yes' : 'No'
-      }));
+      // Prepare worksheet data with selected columns
+      const worksheetData = projects.map(project => {
+        const row = {};
+        if (selectedColumns['Project Name']) row['Project Name'] = project.projectName;
+        if (selectedColumns['Submission Date']) row['Submission Date'] = new Date(project.submissionDate).toLocaleDateString();
+        if (selectedColumns['Supervisor']) row['Supervisor'] = project.supervisorName;
+        if (selectedColumns['Season']) row['Season'] = project.season;
+        if (selectedColumns['Status']) row['Status'] = project.status;
+        if (selectedColumns['Type']) row['Type'] = project.type;
+        if (selectedColumns['Total Amount']) row['Total Amount'] = project.budget ?? 0;
+        if (selectedColumns['Word Count']) row['Word Count'] = project.wordCount ?? 0;
+        if (selectedColumns['CPP']) row['CPP'] = project.cpp ?? 0;
+        if (selectedColumns['Code Price']) row['Code Price'] = project.codePrice ?? 0;
+        if (selectedColumns['Has Code']) row['Has Code'] = project.hasCode ? 'Yes' : 'No';
+        return row;
+      });
 
       const workbook = XLSX.utils.book_new();
       const worksheet = XLSX.utils.json_to_sheet(worksheetData);
-      worksheet['!cols'] = [
-        { wch: 20 }, { wch: 15 }, { wch: 20 }, { wch: 15 }, { wch: 15 },
-        { wch: 15 }, { wch: 15 }, { wch: 12 }, { wch: 12 }, { wch: 12 }, { wch: 10 }
-      ];
+
+      // Add Total Amount calculation if Total Amount column is selected
+      if (selectedColumns['Total Amount']) {
+        const totalRow = worksheetData.length + 2;
+        const totalAmountColumnIndex = Object.keys(worksheetData[0]).indexOf('Total Amount');
+        if (totalAmountColumnIndex !== -1) {
+          const columnLetter = String.fromCharCode(65 + totalAmountColumnIndex); // e.g., 'G' for Total Amount
+          XLSX.utils.sheet_add_aoa(worksheet, [
+            [{ f: `SUM(${columnLetter}2:${columnLetter}${totalRow - 1})` }]
+          ], { origin: `${columnLetter}${totalRow}` });
+          worksheet[`${columnLetter}${totalRow}`].z = '"Ksh."#,##0.00';
+          worksheet[`${columnLetter}${totalRow}`].s = {
+            font: { bold: true },
+            alignment: { horizontal: 'right' }
+          };
+        }
+      }
+
+      // Set column widths based on selected columns
+      const columnWidths = [];
+      Object.keys(selectedColumns).forEach(column => {
+        if (selectedColumns[column]) {
+          columnWidths.push({ wch: column === 'Project Name' || column === 'Supervisor' ? 20 : column === 'Submission Date' || column === 'Season' || column === 'Status' || column === 'Type' || column === 'Total Amount' ? 15 : 12 });
+        }
+      });
+      worksheet['!cols'] = columnWidths;
+
       XLSX.utils.book_append_sheet(workbook, worksheet, 'Invoice');
-      XLSX.writeFile(workbook, `Invoice_${supervisorName}_${season}.xlsx`);
+      XLSX.writeFile(workbook, `Invoice_${supervisorName}_${season}_${projectType}.xlsx`);
 
       setSuccess('Invoice generated, saved, and downloaded successfully!');
       setProjects([]);
@@ -172,7 +240,7 @@ const Invoices = () => {
       setSortColumn(column);
       setSortDirection('asc');
     }
-    setCurrentPage(1); // Reset to first page on sort
+    setCurrentPage(1);
   };
 
   const sortedInvoices = [...invoices].sort((a, b) => {
@@ -213,8 +281,8 @@ const Invoices = () => {
           {success && <Alert variant="success" onClose={() => setSuccess('')} dismissible>{success}</Alert>}
 
           <Form>
-            <div className="row mb-4">
-              <div className="col-md-6">
+            <Row className="mb-4">
+              <Col md={4}>
                 <Form.Group className="mb-3">
                   <Form.Label>Writer Name</Form.Label>
                   <InputGroup>
@@ -231,8 +299,8 @@ const Invoices = () => {
                     </Form.Select>
                   </InputGroup>
                 </Form.Group>
-              </div>
-              <div className="col-md-6">
+              </Col>
+              <Col md={4}>
                 <Form.Group className="mb-3">
                   <Form.Label>Season</Form.Label>
                   <Form.Select
@@ -246,11 +314,41 @@ const Invoices = () => {
                     ))}
                   </Form.Select>
                 </Form.Group>
-              </div>
-            </div>
+              </Col>
+              <Col md={4}>
+                <Form.Group className="mb-3">
+                  <Form.Label>Project Type</Form.Label>
+                  <Form.Select
+                    value={projectType}
+                    onChange={(e) => setProjectType(e.target.value)}
+                    required
+                  >
+                    <option value="">Select Project Type</option>
+                    <option value="Dissertations">Dissertations</option>
+                    <option value="NormalOrders">Normal Orders</option>
+                  </Form.Select>
+                </Form.Group>
+              </Col>
+            </Row>
+
+            <Form.Group className="mb-4">
+              <Form.Label>Select Columns to Include in Invoice</Form.Label>
+              <Row>
+                {Object.keys(selectedColumns).map(column => (
+                  <Col xs={6} md={4} lg={3} key={column} className="mb-2">
+                    <Form.Check
+                      type="checkbox"
+                      label={column}
+                      checked={selectedColumns[column]}
+                      onChange={() => handleColumnChange(column)}
+                    />
+                  </Col>
+                ))}
+              </Row>
+            </Form.Group>
 
             <div className="d-flex gap-3">
-              <Button variant="primary" onClick={fetchProjects} disabled={!supervisorName || !season}>
+              <Button variant="primary" onClick={fetchProjects} disabled={!supervisorName || !season || !projectType}>
                 Search Projects
               </Button>
               <Button variant="success" onClick={generateInvoice} disabled={projects.length === 0}>
@@ -262,7 +360,7 @@ const Invoices = () => {
           {projects.length > 0 && (
             <div className="mt-4">
               <p className="text-muted">
-                Found {projects.length} project{projects.length !== 1 ? 's' : ''} for {supervisorName} in {season}
+                Found {projects.length} {projectType.toLowerCase()}{projects.length !== 1 ? 's' : ''} for {supervisorName} in {season}
               </p>
             </div>
           )}
@@ -286,7 +384,7 @@ const Invoices = () => {
                     value={recordsPerPage}
                     onChange={(e) => {
                       setRecordsPerPage(Number(e.target.value));
-                      setCurrentPage(1); // Reset to first page when changing records per page
+                      setCurrentPage(1);
                     }}
                     style={{ width: '100px' }}
                   >
@@ -312,6 +410,12 @@ const Invoices = () => {
                       <th onClick={() => handleSort('season')} style={{ cursor: 'pointer' }}>
                         Season{' '}
                         {sortColumn === 'season' && (
+                          <ArrowUpDown size={16} className="ms-1" />
+                        )}
+                      </th>
+                      <th onClick={() => handleSort('projectType')} style={{ cursor: 'pointer' }}>
+                        Project Type{' '}
+                        {sortColumn === 'projectType' && (
                           <ArrowUpDown size={16} className="ms-1" />
                         )}
                       </th>
@@ -348,6 +452,7 @@ const Invoices = () => {
                         <td>{indexOfFirstRecord + index + 1}</td>
                         <td>{invoice.supervisorName}</td>
                         <td>{invoice.season}</td>
+                        <td>{invoice.projectType}</td>
                         <td>Ksh.{invoice.totalAmount.toLocaleString()}</td>
                         <td>{invoice.projectCount}</td>
                         <td>

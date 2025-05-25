@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Form, Button, Badge } from 'react-bootstrap';
+import { Container, Row, Col, Card, Form, Button } from 'react-bootstrap';
 import { Bar, Pie } from 'react-chartjs-2';
 import { collection, getDocs, query, where } from 'firebase/firestore';
 import { db } from './firebase';
@@ -15,6 +15,7 @@ import {
   Legend,
   ArcElement,
 } from 'chart.js';
+import ChartDataLabels from 'chartjs-plugin-datalabels';
 
 ChartJS.register(
   CategoryScale,
@@ -23,21 +24,22 @@ ChartJS.register(
   Title,
   Tooltip,
   Legend,
-  ArcElement
+  ArcElement,
+  ChartDataLabels
 );
 
 const Reports = () => {
   const [projectData, setProjectData] = useState([]);
-  const [selectedYear, setSelectedYear] = useState(new Date().getFullYear().toString());
+  const [selectedSeason, setSelectedSeason] = useState('');
   const [selectedSupervisor, setSelectedSupervisor] = useState('');
-  const [availableYears, setAvailableYears] = useState([]);
+  const [availableSeasons, setAvailableSeasons] = useState([]);
   const [availableSupervisors, setAvailableSupervisors] = useState([]);
   const [projectStats, setProjectStats] = useState({
-    normal: 0,
+    normalOrder: 0,
     dissertation: 0,
-    statusCounts: { 'Pending': 0, 'In Progress': 0, 'Completed': 0 },
+    statusCounts: { Pending: 0, InProgress: 0, Completed: 0 },
     totalBudget: 0,
-    budgetByType: { Normal: 0, Dissertation: 0 },
+    budgetByType: { NormalOrder: 0, Dissertation: 0 },
   });
 
   useEffect(() => {
@@ -46,22 +48,42 @@ const Reports = () => {
 
   useEffect(() => {
     fetchProjectsByFilters();
-  }, [selectedYear, selectedSupervisor]);
+  }, [selectedSeason, selectedSupervisor]);
 
   const fetchInitialData = async () => {
     try {
-      const projectsRef = collection(db, 'projects');
-      const snapshot = await getDocs(projectsRef);
-      const years = new Set();
+      const dissertationsRef = collection(db, 'dissertations');
+      const dissertationsSnapshot = await getDocs(dissertationsRef);
+      const dissertationsList = dissertationsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        type: 'Dissertation',
+        ...doc.data(),
+      }));
+
+      const normalOrdersRef = collection(db, 'normalOrders');
+      const normalOrdersSnapshot = await getDocs(normalOrdersRef);
+      const normalOrdersList = normalOrdersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        type: 'NormalOrder',
+        ...doc.data(),
+      }));
+
+      const projects = [...dissertationsList, ...normalOrdersList];
+      const seasons = new Set();
       const supervisors = new Set();
-      snapshot.forEach(doc => {
-        const project = doc.data();
-        years.add(project.season);
-        supervisors.add(project.supervisorName);
+
+      projects.forEach(project => {
+        if (project.season) seasons.add(project.season);
+        if (project.supervisorName) supervisors.add(project.supervisorName);
       });
-      setAvailableYears(Array.from(years).sort().reverse());
+
+      const sortedSeasons = Array.from(seasons).sort();
+      setAvailableSeasons(sortedSeasons);
       setAvailableSupervisors(Array.from(supervisors).sort());
-      if (!selectedYear && years.size > 0) setSelectedYear(Array.from(years)[0]);
+
+      if (!selectedSeason && seasons.size > 0) {
+        setSelectedSeason(sortedSeasons[0]);
+      }
     } catch (error) {
       console.error('Error fetching initial data:', error);
       alert('Error fetching initial data');
@@ -70,45 +92,71 @@ const Reports = () => {
 
   const fetchProjectsByFilters = async () => {
     try {
-      const projectsRef = collection(db, 'projects');
-      let q = query(projectsRef, where('season', '==', selectedYear));
-      if (selectedSupervisor) {
-        q = query(q, where('supervisorName', '==', selectedSupervisor));
+      let projects = [];
+
+      let dissertationsQuery = collection(db, 'dissertations');
+      if (selectedSeason) {
+        dissertationsQuery = query(dissertationsQuery, where('season', '==', selectedSeason));
       }
-      const snapshot = await getDocs(q);
-      const projects = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+      if (selectedSupervisor) {
+        dissertationsQuery = query(dissertationsQuery, where('supervisorName', '==', selectedSupervisor));
+      }
+      const dissertationsSnapshot = await getDocs(dissertationsQuery);
+      const dissertationsList = dissertationsSnapshot.docs.map(doc => ({
+        id: doc.id,
+        type: 'Dissertation',
+        ...doc.data(),
+      }));
+
+      let normalOrdersQuery = collection(db, 'normalOrders');
+      if (selectedSeason) {
+        normalOrdersQuery = query(normalOrdersQuery, where('season', '==', selectedSeason));
+      }
+      if (selectedSupervisor) {
+        normalOrdersQuery = query(normalOrdersQuery, where('supervisorName', '==', selectedSupervisor));
+      }
+      const normalOrdersSnapshot = await getDocs(normalOrdersQuery);
+      const normalOrdersList = normalOrdersSnapshot.docs.map(doc => ({
+        id: doc.id,
+        type: 'NormalOrder',
+        ...doc.data(),
+      }));
+
+      projects = [...dissertationsList, ...normalOrdersList];
       setProjectData(projects);
 
-      let normal = 0, dissertation = 0, totalBudget = 0;
-      const statusCounts = { 'Pending': 0, 'In Progress': 0, 'Completed': 0 };
-      const budgetByType = { Normal: 0, Dissertation: 0 };
+      let normalOrder = 0, dissertation = 0, totalBudget = 0;
+      const statusCounts = { Pending: 0, InProgress: 0, Completed: 0 };
+      const budgetByType = { NormalOrder: 0, Dissertation: 0 };
 
       projects.forEach(project => {
-        if (project.type === 'Normal') {
-          normal++;
-          budgetByType.Normal += project.budget || 0;
+        if (project.type === 'NormalOrder') {
+          normalOrder++;
+          budgetByType.NormalOrder += project.budget || 0;
         } else if (project.type === 'Dissertation') {
           dissertation++;
           budgetByType.Dissertation += project.budget || 0;
         }
-        if (project.status in statusCounts) statusCounts[project.status]++;
+        const statusKey = project.status === 'In Progress' ? 'InProgress' : project.status;
+        if (statusKey in statusCounts) statusCounts[statusKey]++;
         totalBudget += project.budget || 0;
       });
 
-      setProjectStats({ normal, dissertation, statusCounts, totalBudget, budgetByType });
+      setProjectStats({ normalOrder, dissertation, statusCounts, totalBudget, budgetByType });
     } catch (error) {
       console.error('Error fetching project data:', error);
       alert('Error fetching project data');
     }
   };
 
+  const totalProjects = projectStats.normalOrder + projectStats.dissertation;
+
   const projectTypeChartData = {
-    labels: ['Normal Projects', 'Dissertation Projects'],
+    labels: ['Normal Orders', 'Dissertations'],
     datasets: [{
       label: 'Project Distribution',
-      data: [projectStats.normal, projectStats.dissertation],
+      data: [projectStats.normalOrder, projectStats.dissertation],
       backgroundColor: ['rgba(54, 162, 235, 0.6)', 'rgba(255, 99, 132, 0.6)'],
-      borderWidth: 1,
     }],
   };
 
@@ -117,20 +165,19 @@ const Reports = () => {
     datasets: [{
       label: 'Project Status Distribution',
       data: [
-        projectStats.statusCounts['Pending'],
-        projectStats.statusCounts['In Progress'],
-        projectStats.statusCounts['Completed'],
+        projectStats.statusCounts.Pending,
+        projectStats.statusCounts.InProgress,
+        projectStats.statusCounts.Completed,
       ],
       backgroundColor: ['rgba(255, 206, 86, 0.6)', 'rgba(75, 192, 192, 0.6)', 'rgba(153, 102, 255, 0.6)'],
-      borderWidth: 1,
     }],
   };
 
   const budgetDistributionChartData = {
-    labels: ['Normal', 'Dissertation'],
+    labels: ['Normal Orders', 'Dissertations'],
     datasets: [{
       label: 'Budget Distribution (Ksh)',
-      data: [projectStats.budgetByType.Normal, projectStats.budgetByType.Dissertation],
+      data: [projectStats.budgetByType.NormalOrder, projectStats.budgetByType.Dissertation],
       backgroundColor: ['rgba(54, 162, 235, 0.8)', 'rgba(255, 99, 132, 0.8)'],
       hoverOffset: 4,
     }],
@@ -146,9 +193,25 @@ const Reports = () => {
           label: (context) => {
             const label = context.dataset.label || '';
             const value = context.parsed.y || context.parsed;
-            return `${label}: ${typeof value === 'number' ? value.toLocaleString() : value}`;
+            const total = context.dataset.data.reduce((sum, val) => sum + val, 0);
+            const percentage = total > 0 ? ((value / total) * 100).toFixed(1) : 0;
+            return `${label}: ${value.toLocaleString()} (${percentage}%)`;
           },
         },
+      },
+      datalabels: {
+        color: '#fff',
+        formatter: (value, context) => {
+          const total = context.dataset.data.reduce((sum, val) => sum + val, 0);
+          const percentage = total > 0 ? ((value / total) * 100).toFixed(0) : 0;
+          return `${percentage}%`;
+        },
+        font: {
+          weight: 'bold',
+          size: 12,
+        },
+        anchor: 'center',
+        align: 'center',
       },
     },
   };
@@ -163,23 +226,36 @@ const Reports = () => {
             const label = context.label || '';
             const value = context.raw;
             const total = context.dataset.data.reduce((sum, val) => sum + val, 0);
-            const percentage = ((value / total) * 100).toFixed(1);
+            const percentage = total > 0 ? ((value / total) * 100).toFixed(0) : 0;
             return `${label}: Ksh.${value.toLocaleString()} (${percentage}%)`;
           },
         },
       },
+      datalabels: {
+        color: 'black',
+        formatter: (value, context) => {
+          const total = context.dataset.data.reduce((sum, val) => sum + val, 0);
+          const percentage = total > 0 ? ((value / total) * 100).toFixed(0) : 0;
+          return `${percentage}%`;
+        },
+        font: {
+          weight: 'bold',
+          size: 12,
+        },
+        anchor: 'center',
+        align: 'center',
+      },
     },
   };
 
-  const totalProjects = projectStats.normal + projectStats.dissertation;
   const completionRate = totalProjects > 0
-    ? ((projectStats.statusCounts['Completed'] / totalProjects) * 100).toFixed(1)
+    ? ((projectStats.statusCounts.Completed / totalProjects) * 100).toFixed(0)
     : 0;
 
   const downloadPDFReport = () => {
     const doc = new jsPDF();
     doc.text('Project Analytics Report', 20, 20);
-    doc.text(`Season: ${selectedYear}`, 20, 30);
+    doc.text(`Season: ${selectedSeason}`, 20, 30);
     if (selectedSupervisor) doc.text(`Supervisor: ${selectedSupervisor}`, 20, 40);
 
     doc.autoTable({
@@ -187,19 +263,20 @@ const Reports = () => {
       head: [['Metric', 'Value']],
       body: [
         ['Total Projects', totalProjects],
-        ['Normal Projects', projectStats.normal],
-        ['Dissertation Projects', projectStats.dissertation],
-        ['Pending', projectStats.statusCounts['Pending']],
-        ['In Progress', projectStats.statusCounts['In Progress']],
-        ['Completed', projectStats.statusCounts['Completed']],
+        ['Normal Orders', projectStats.normalOrder],
+        ['Dissertations', projectStats.dissertation],
+        ['Pending', projectStats.statusCounts.Pending],
+        ['In Progress', projectStats.statusCounts.InProgress],
+        ['Completed', projectStats.statusCounts.Completed],
         ['Completion Rate', `${completionRate}%`],
         ['Total Budget', `Ksh.${projectStats.totalBudget.toLocaleString()}`],
-        ['Normal Budget', `Ksh.${projectStats.budgetByType.Normal.toLocaleString()}`],
-        ['Dissertation Budget', `Ksh.${projectStats.budgetByType.Dissertation.toLocaleString()}`],
+        ['Normal Orders Budget', `Ksh.${projectStats.budgetByType.NormalOrder.toLocaleString()}`],
+        ['Dissertations Budget', `Ksh.${projectStats.budgetByType.Dissertation.toLocaleString()}`],
       ],
     });
 
-    doc.save(`Project_Report_${selectedYear}${selectedSupervisor ? `_${selectedSupervisor}` : ''}.pdf`);
+    const filename = `Project_Report_${selectedSeason.replace(/\s+/g, '_')}${selectedSupervisor ? `_${selectedSupervisor.replace(/\s+/g, '_')}` : ''}.pdf`;
+    doc.save(filename);
   };
 
   return (
@@ -209,7 +286,7 @@ const Reports = () => {
           <Card className="shadow-sm">
             <Card.Body>
               <Card.Title className="mb-4 d-flex justify-content-between align-items-center">
-                Project Analytics Dashboard
+                Project Analytics Dashboard - Season {selectedSeason || 'N/A'}
                 <Button variant="outline-primary" size="sm" onClick={downloadPDFReport}>
                   <i className="bi bi-download me-2"></i>Download PDF
                 </Button>
@@ -219,12 +296,12 @@ const Reports = () => {
                   <Form.Group>
                     <Form.Label>Select Season</Form.Label>
                     <Form.Select
-                      value={selectedYear}
-                      onChange={(e) => setSelectedYear(e.target.value)}
+                      value={selectedSeason}
+                      onChange={(e) => setSelectedSeason(e.target.value)}
                       className="mb-3"
                     >
-                      {availableYears.map(year => (
-                        <option key={year} value={year}>{year}</option>
+                      {availableSeasons.map(season => (
+                        <option key={season} value={season}>{season}</option>
                       ))}
                     </Form.Select>
                   </Form.Group>
@@ -264,7 +341,7 @@ const Reports = () => {
         <Col md={4}>
           <Card className="shadow-sm">
             <Card.Body>
-              <Card.Title>Project Status Distribution</Card.Title>
+              <Card.Title>Project Status</Card.Title>
               <div style={{ height: '300px' }}>
                 <Bar data={projectStatusChartData} options={chartOptions} />
               </div>
@@ -283,36 +360,41 @@ const Reports = () => {
         </Col>
       </Row>
 
-      <Row>
-        <Col>
-          <Card className="shadow-sm">
-            <Card.Body>
-              <Card.Title>Summary Statistics</Card.Title>
-              <Row className="mt-3 text-center">
-                <Col md={3}>
-                  <h5>Total Projects</h5>
-                  <p className="h2">{totalProjects}</p>
-                </Col>
-                <Col md={3}>
-                  <h5>Completion Rate</h5>
-                  <p className="h2">{completionRate}%</p>
-                  <Badge bg={completionRate >= 75 ? 'success' : 'warning'}>
-                    {completionRate >= 75 ? 'High' : 'Moderate'}
-                  </Badge>
-                </Col>
-                <Col md={3}>
-                  <h5>Total Budget</h5>
-                  <p className="h2">Ksh.{projectStats.totalBudget.toLocaleString()}</p>
-                </Col>
-                <Col md={3}>
-                  <h5>In Progress</h5>
-                  <p className="h2">{projectStats.statusCounts['In Progress']}</p>
-                </Col>
-              </Row>
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
+      <Row className="mt-4">
+      <Col md={3}>
+        <Card bg="primary" text="white" className="shadow-sm">
+          <Card.Body>
+            <Card.Title>Total Projects</Card.Title>
+            <h3>{totalProjects}</h3>
+          </Card.Body>
+        </Card>
+      </Col>
+      <Col md={3}>
+        <Card bg="success" text="white" className="shadow-sm">
+          <Card.Body>
+            <Card.Title>Completed Projects</Card.Title>
+            <h3>{projectStats.statusCounts.Completed}</h3>
+          </Card.Body>
+        </Card>
+      </Col>
+      <Col md={3}>
+        <Card bg="info" text="white" className="shadow-sm">
+          <Card.Body>
+            <Card.Title>Total Budget</Card.Title>
+            <h5>Ksh. {projectStats.totalBudget.toLocaleString()}</h5>
+          </Card.Body>
+        </Card>
+      </Col>
+      <Col md={3}>
+        <Card bg="warning" text="dark" className="shadow-sm">
+          <Card.Body>
+            <Card.Title>Completion Rate</Card.Title>
+            <h4>{completionRate}%</h4>
+          </Card.Body>
+        </Card>
+      </Col>
+    </Row>
+
     </Container>
   );
 };
