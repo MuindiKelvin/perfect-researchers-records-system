@@ -26,7 +26,7 @@ const NormalOrders = () => {
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [recordsPerPage, setRecordsPerPage] = useState(5);
+  const [recordsPerPage, setRecordsPerPage] = useState(50);
   const [filteredOrders, setFilteredOrders] = useState([]);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [sortColumn, setSortColumn] = useState('status');
@@ -467,6 +467,7 @@ const NormalOrders = () => {
               <option value={10}>10 per page</option>
               <option value={15}>15 per page</option>
               <option value={20}>20 per page</option>
+              <option value={50}>50 per page</option>
             </Form.Select>
           </div>
         </Card.Body>
@@ -650,7 +651,7 @@ const NormalOrders = () => {
                   />
                 </Form.Group>
               </div>
-              <div className="col-md-6">
+              <div className nunc="col-md-6">
                 <Form.Group>
                   <Form.Label>Due Date <span className="text-danger">*</span></Form.Label>
                   <Form.Control

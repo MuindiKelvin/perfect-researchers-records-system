@@ -18,8 +18,8 @@ const Dissertations = () => {
     budget: '',
     wordCount: '',
     hasCode: false,
-    cpp: '425', // Higher default for dissertations
-    codePrice: '10000', // Higher default for dissertations
+    cpp: '425',
+    codePrice: '10000',
     progress: 0,
     wordsPaid: 0,
     remainingBalance: 0,
@@ -33,7 +33,7 @@ const Dissertations = () => {
   const [editingId, setEditingId] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
-  const [recordsPerPage, setRecordsPerPage] = useState(5);
+  const [recordsPerPage, setRecordsPerPage] = useState(50);
   const [filteredOrders, setFilteredOrders] = useState([]);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [sortColumn, setSortColumn] = useState('');
@@ -291,8 +291,8 @@ const Dissertations = () => {
       const row = {};
       if (selectedColumns.projectName) row['Dissertation Title'] = rest.projectName;
       if (selectedColumns.supervisorName) row['Writer'] = rest.supervisorName;
-      if (selectedColumns.orderDate) row['Order Date'] = new Date(rest.orderDate).toLocaleDateString();
-      if (selectedColumns.submissionDate) row['Submission Date'] = new Date(rest.submissionDate).toLocaleDateString();
+      if (selectedColumns.orderDate) row['Order Date'] = rest.orderDate ? new Date(rest.orderDate).toLocaleDateString() : '';
+      if (selectedColumns.submissionDate) row['Submission Date'] = rest.submissionDate ? new Date(rest.submissionDate).toLocaleDateString() : '';
       if (selectedColumns.status) row['Status'] = rest.status;
       if (selectedColumns.season) row['Season'] = rest.season;
       if (selectedColumns.budget) row['Total Amount'] = `Ksh.${rest.budget?.toLocaleString() ?? 0}`;
@@ -309,11 +309,11 @@ const Dissertations = () => {
     });
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
-    const totalAmount = filteredOrders.reduce((sum, diss) => sum + (diss.budget || 0), 0);
+    const totalBalance = filteredOrders.reduce((sum, diss) => sum + (diss.remainingBalance || 0), 0);
     const totalRow = filteredOrders.length + 3;
     const lastColIndex = Object.keys(exportData[0] || {}).length - 1;
     const totalCol = lastColIndex >= 0 ? String.fromCharCode(65 + lastColIndex + 2) : 'C';
-    XLSX.utils.sheet_add_aoa(worksheet, [[`Total Amount: Ksh.${totalAmount.toLocaleString()}`]], { origin: `${totalCol}${totalRow}` });
+    XLSX.utils.sheet_add_aoa(worksheet, [[`Total Balance: Ksh.${totalBalance.toLocaleString()}`]], { origin: `${totalCol}${totalRow}` });
 
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Dissertations');
     XLSX.writeFile(workbook, `dissertations_${new Date().toISOString().split('T')[0]}.xlsx`);
@@ -346,11 +346,11 @@ const Dissertations = () => {
     let valueB = b[sortColumn];
 
     if (['orderDate', 'submissionDate', 'datePaid'].includes(sortColumn)) {
-      valueA = new Date(valueA);
-      valueB = new Date(valueB);
+      valueA = valueA ? new Date(valueA) : new Date(0);
+      valueB = valueB ? new Date(valueB) : new Date(0);
     } else if (['budget', 'wordCount', 'cpp', 'codePrice', 'progress', 'totalPaid', 'remainingBalance'].includes(sortColumn)) {
-      valueA = Number(valueA);
-      valueB = Number(valueB);
+      valueA = Number(valueA) || 0;
+      valueB = Number(valueB) || 0;
     }
 
     if (valueA < valueB) return sortDirection === 'asc' ? -1 : 1;
@@ -456,10 +456,10 @@ const Dissertations = () => {
     ...filteredOrders.map(diss => [
       diss.id,
       diss.projectName,
-      new Date(diss.orderDate),
-      new Date(diss.submissionDate),
+      diss.orderDate ? new Date(diss.orderDate) : null,
+      diss.submissionDate ? new Date(diss.submissionDate) : null,
       null,
-      diss.progress,
+      Number(diss.progress) || 0,
       null,
     ]),
   ];
@@ -477,13 +477,53 @@ const Dissertations = () => {
     },
   };
 
+  const calculatePaymentSummary = () => {
+    if (!selectedDissertation) return { unpaidWords: 0, amountToPay: 0 };
+    
+    const totalWords = Number(selectedDissertation.wordCount) || 0;
+    const wordsPaid = Number(paymentData.wordsPaid) || 0;
+    const cpp = Number(selectedDissertation.cpp) || 0;
+    const hasCode = selectedDissertation.hasCode || false;
+    const codePrice = Number(selectedDissertation.codePrice) || 0;
+    
+    const unpaidWords = Math.max(0, totalWords - wordsPaid);
+    const pagesUnpaid = unpaidWords / 275;
+    let amountToPay = pagesUnpaid * cpp;
+    if (hasCode && unpaidWords > 0) {
+      amountToPay += codePrice;
+    }
+    
+    return {
+      unpaidWords: unpaidWords.toLocaleString(),
+      amountToPay: amountToPay.toLocaleString()
+    };
+  };
+
+  const calculateAmountPaid = (wordsPaid) => {
+    if (!selectedDissertation) return 0;
+    const cpp = Number(selectedDissertation.cpp) || 0;
+    const pagesPaid = Number(wordsPaid) / 275;
+    return Math.round(pagesPaid * cpp);
+  };
+
+  const handleWordsPaidChange = (e) => {
+    const wordsPaid = e.target.value === '' ? 0 : Number(e.target.value);
+    const amountPaid = calculateAmountPaid(wordsPaid);
+    setPaymentData(prev => ({
+      ...prev,
+      wordsPaid,
+      amountPaid
+    }));
+  };
+
+  const paymentSummary = calculatePaymentSummary();
+
   return (
     <Container className="py-4">
       <div className="mb-4 d-flex justify-content-between align-items-center">
         <h2 className="mb-0 fw-bold">
-           <i className="bi bi-journal-bookmark-fill me-2"></i>  Dissertations 
+          <i className="bi bi-journal-bookmark-fill me-2"></i> Dissertations
         </h2>
-
         <div className="d-flex gap-3 align-items-center">
           <Button 
             variant="primary" 
@@ -570,6 +610,7 @@ const Dissertations = () => {
               <option value={10}>10 per page</option>
               <option value={15}>15 per page</option>
               <option value={20}>20 per page</option>
+              <option value={50}>50 per page</option>
             </Form.Select>
           </div>
         </Card.Body>
@@ -706,7 +747,7 @@ const Dissertations = () => {
                     />
                   </OverlayTrigger>
                 </td>
-                <td>{new Date(diss.submissionDate).toLocaleDateString()}</td>
+                <td>{diss.submissionDate ? new Date(diss.submissionDate).toLocaleDateString() : ''}</td>
                 <td>
                   <Button
                     variant="outline-info"
@@ -770,7 +811,6 @@ const Dissertations = () => {
         </div>
       )}
 
-      {/* Form Modal */}
       <Modal show={showFormModal} onHide={handleCloseFormModal} size="lg">
         <Modal.Header closeButton>
           <Modal.Title>{editingId ? 'Edit Dissertation' : 'Add New Dissertation'}</Modal.Title>
@@ -984,7 +1024,6 @@ const Dissertations = () => {
         </Modal.Footer>
       </Modal>
 
-      {/* Payment Update Modal */}
       <Modal show={showPaymentModal} onHide={() => setShowPaymentModal(false)}>
         <Modal.Header closeButton>
           <Modal.Title>Update Payment - {selectedDissertation?.projectName}</Modal.Title>
@@ -998,8 +1037,9 @@ const Dissertations = () => {
                   <Form.Control
                     type="number"
                     value={paymentData.wordsPaid}
-                    onChange={(e) => setPaymentData({ ...paymentData, wordsPaid: e.target.value })}
+                    onChange={handleWordsPaidChange}
                     min="0"
+                    max={selectedDissertation?.wordCount || 0}
                   />
                 </Form.Group>
               </div>
@@ -1009,8 +1049,8 @@ const Dissertations = () => {
                   <Form.Control
                     type="number"
                     value={paymentData.amountPaid}
-                    onChange={(e) => setPaymentData({ ...paymentData, amountPaid: e.target.value })}
-                    min="0"
+                    readOnly
+                    disabled
                   />
                 </Form.Group>
               </div>
@@ -1038,8 +1078,13 @@ const Dissertations = () => {
               {selectedDissertation && (
                 <div className="mt-3 p-3 bg-light rounded">
                   <h6>Payment Summary:</h6>
-                  <p><strong>Total Amount:</strong> Ksh.${selectedDissertation.budget?.toLocaleString() ?? 0}</p>
-                  <p><strong>Remaining Balance:</strong> Ksh.${calculateRemainingBalance(selectedDissertation.budget, paymentData.amountPaid)?.toLocaleString() ?? 0}</p>
+                  <p><strong>Total Words:</strong> {selectedDissertation.wordCount?.toLocaleString() ?? 0}</p>
+                  <p><strong>Words Paid:</strong> {paymentData.wordsPaid?.toLocaleString() ?? 0}</p>
+                  <p><strong>Unpaid Words:</strong> {paymentSummary.unpaidWords}</p>
+                  <p><strong>Total Amount:</strong> Ksh.{selectedDissertation.budget?.toLocaleString() ?? 0}</p>
+                  <p><strong>Amount Paid:</strong> Ksh.{paymentData.amountPaid?.toLocaleString() ?? 0}</p>
+                  <p><strong>Remaining Balance:</strong> Ksh.{calculateRemainingBalance(selectedDissertation.budget, paymentData.amountPaid)?.toLocaleString() ?? 0}</p>
+                  <p><strong>Amount to Pay for Unpaid Words:</strong> Ksh.{paymentSummary.amountToPay}</p>
                 </div>
               )}
             </div>
@@ -1055,7 +1100,6 @@ const Dissertations = () => {
         </Modal.Footer>
       </Modal>
 
-      {/* Gantt Chart Modal */}
       <Modal show={showGanttModal} onHide={() => setShowGanttModal(false)} size="lg">
         <Modal.Header closeButton>
           <Modal.Title>Dissertation Timeline (Gantt Chart)</Modal.Title>
@@ -1076,7 +1120,6 @@ const Dissertations = () => {
         </Modal.Footer>
       </Modal>
 
-      {/* Bulk Import Modal */}
       <Modal show={showImportModal} onHide={() => setShowImportModal(false)}>
         <Modal.Header closeButton>
           <Modal.Title>Bulk Import Dissertations</Modal.Title>
@@ -1104,7 +1147,6 @@ const Dissertations = () => {
         </Modal.Footer>
       </Modal>
 
-      {/* Export Columns Selection Modal */}
       <Modal show={showExportModal} onHide={() => setShowExportModal(false)}>
         <Modal.Header closeButton>
           <Modal.Title>Select Columns to Export</Modal.Title>
@@ -1117,9 +1159,9 @@ const Dissertations = () => {
                 type="checkbox"
                 label={column === 'supervisorName' ? 'Writer' : 
                       column === 'projectName' ? 'Dissertation Title' : 
-                      column === 'budget' ? "Total Paid" : 
+                      column === 'budget' ? 'Total Amount' : 
                       column === 'totalPaid' ? 'Amount Paid' : 
-                      column === 'remainingBalance' ? 'Paid' : 
+                      column === 'remainingBalance' ? 'Balance' : 
                       column === 'isFullyPaid' ? 'Fully Paid' : 
                       column === 'datePaid' ? 'Date Paid' : 
                       column.charAt(0).toUpperCase() + column.slice(1)}

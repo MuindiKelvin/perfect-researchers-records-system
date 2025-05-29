@@ -22,7 +22,7 @@ const menuItems = [
   { path: '/profile', name: 'Profile', icon: 'bi-person-circle' },
 ];
 
-const Sidebar = () => {
+const Sidebar = ({ onLogout, isMobile, onNavigate }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const [expanded, setExpanded] = useState(true);
@@ -32,6 +32,7 @@ const Sidebar = () => {
   const handleLogout = async () => {
     try {
       await signOut(auth);
+      if (onLogout) onLogout(); // Call onLogout prop from App
       navigate('/login');
       window.location.reload();
     } catch (error) {
@@ -41,6 +42,17 @@ const Sidebar = () => {
 
   const toggleTheme = () => {
     setDarkTheme(!darkTheme);
+  };
+
+  const handleProjectsClick = (e) => {
+    e.preventDefault(); // Prevent navigation
+    setShowProjectsSubMenu(!showProjectsSubMenu); // Toggle sub-menu
+  };
+
+  const handleSubMenuClick = () => {
+    if (isMobile && onNavigate) {
+      onNavigate(); // Close mobile sidebar on sub-menu navigation
+    }
   };
 
   const renderTooltip = (name) => (
@@ -53,10 +65,11 @@ const Sidebar = () => {
       style={{
         transition: 'width 0.3s ease, background-color 0.3s ease',
         width: expanded ? '250px' : '75px',
-        position: 'sticky',
+        position: isMobile ? 'fixed' : 'sticky',
         top: 0,
         height: '100vh',
         borderRight: `1px solid ${darkTheme ? '#444' : '#ddd'}`,
+        zIndex: isMobile ? 1045 : 'auto',
       }}
     >
       <div className="d-flex flex-column h-100">
@@ -94,22 +107,38 @@ const Sidebar = () => {
                 overlay={!expanded ? renderTooltip(item.name) : <BootstrapTooltip id="dummy" />}
                 delay={{ show: 250, hide: 400 }}
               >
-                <Nav.Link
-                  as={Link}
-                  to={item.path}
-                  className={`px-3 py-2 d-flex align-items-center
-                    ${location.pathname === item.path ? 'bg-primary text-white' : darkTheme ? 'text-white-50' : 'text-dark'}
-                    ${expanded ? '' : 'justify-content-center'}
-                    hover-highlight`}
-                  style={{ cursor: 'pointer' }}
-                  onClick={() => item.subItems && setShowProjectsSubMenu(!showProjectsSubMenu)}
-                >
-                  <i className={`${item.icon} ${expanded ? 'me-2' : ''}`} style={{ fontSize: '1.3rem' }}></i>
-                  {expanded && <span>{item.name}</span>}
-                  {expanded && item.subItems && (
-                    <i className={`ms-auto bi ${showProjectsSubMenu ? 'bi-chevron-down' : 'bi-chevron-right'}`}></i>
-                  )}
-                </Nav.Link>
+                {item.subItems ? (
+                  <Nav.Link
+                    as="a" // Use plain anchor to avoid navigation
+                    href="#"
+                    className={`px-3 py-2 d-flex align-items-center
+                      ${location.pathname.startsWith(item.path) ? 'bg-primary text-white' : darkTheme ? 'text-white-50' : 'text-dark'}
+                      ${expanded ? '' : 'justify-content-center'}
+                      hover-highlight`}
+                    style={{ cursor: 'pointer' }}
+                    onClick={handleProjectsClick}
+                  >
+                    <i className={`${item.icon} ${expanded ? 'me-2' : ''}`} style={{ fontSize: '1.3rem' }}></i>
+                    {expanded && <span>{item.name}</span>}
+                    {expanded && item.subItems && (
+                      <i className={`ms-auto bi ${showProjectsSubMenu ? 'bi-chevron-down' : 'bi-chevron-right'}`}></i>
+                    )}
+                  </Nav.Link>
+                ) : (
+                  <Nav.Link
+                    as={Link}
+                    to={item.path}
+                    className={`px-3 py-2 d-flex align-items-center
+                      ${location.pathname === item.path ? 'bg-primary text-white' : darkTheme ? 'text-white-50' : 'text-dark'}
+                      ${expanded ? '' : 'justify-content-center'}
+                      hover-highlight`}
+                    style={{ cursor: 'pointer' }}
+                    onClick={handleSubMenuClick}
+                  >
+                    <i className={`${item.icon} ${expanded ? 'me-2' : ''}`} style={{ fontSize: '1.3rem' }}></i>
+                    {expanded && <span>{item.name}</span>}
+                  </Nav.Link>
+                )}
               </OverlayTrigger>
               {item.subItems && showProjectsSubMenu && expanded && (
                 <Nav className="flex-column ms-3">
@@ -127,6 +156,7 @@ const Sidebar = () => {
                           ${location.pathname === subItem.path ? 'bg-primary text-white' : darkTheme ? 'text-white-50' : 'text-dark'}
                           hover-highlight`}
                         style={{ cursor: 'pointer', fontSize: '0.9rem' }}
+                        onClick={handleSubMenuClick}
                       >
                         <i className={`${subItem.icon} me-2`} style={{ fontSize: '1.1rem' }}></i>
                         {expanded && <span>{subItem.name}</span>}
@@ -185,6 +215,9 @@ const Sidebar = () => {
       <style>{`
         .w-250 {
           width: 250px;
+        }
+        .w-75 {
+          width: 75px;
         }
         .hover-highlight:hover {
           background-color: ${darkTheme ? 'rgba(255, 255, 255, 0.1)' : 'rgba(0, 0, 0, 0.05)'};
