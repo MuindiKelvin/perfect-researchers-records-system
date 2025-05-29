@@ -394,7 +394,7 @@ const NormalOrders = () => {
             onClick={() => setShowFormModal(true)}
             className="px-4 py-2"
           >
-            <i className="bi bi-plus-circle me-2"></i>Add New Normal Order
+            <i className="bi bi-plus-circle me-2"></i>Add a New Normal Order
           </Button>
           <Button 
             variant="outline-info" 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Form, Button, Container, Card, Table, Badge, InputGroup, Modal, ProgressBar, OverlayTrigger, Tooltip } from 'react-bootstrap';
-import { collection, addDoc, updateDoc, doc, getDocs, deleteDoc, query, orderBy, where } from 'firebase/firestore';
+import { collection, addDoc, updateDoc, doc, getDocs, deleteDoc, query, orderBy } from 'firebase/firestore';
 import { db } from './firebase';
 import * as XLSX from 'xlsx';
 import { Chart } from 'react-google-charts';
@@ -34,7 +34,7 @@ const Dissertations = () => {
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
   const [recordsPerPage, setRecordsPerPage] = useState(5);
-  const [filteredDissertations, setFilteredDissertations] = useState([]);
+  const [filteredOrders, setFilteredOrders] = useState([]);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
   const [sortColumn, setSortColumn] = useState('');
   const [sortDirection, setSortDirection] = useState('asc');
@@ -42,6 +42,7 @@ const Dissertations = () => {
   const [showImportModal, setShowImportModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
   const [showExportModal, setShowExportModal] = useState(false);
+  const [showFormModal, setShowFormModal] = useState(false);
   const [selectedDissertation, setSelectedDissertation] = useState(null);
   const [paymentData, setPaymentData] = useState({
     wordsPaid: 0,
@@ -88,7 +89,7 @@ const Dissertations = () => {
 
       return matchesSearch && matchesDateRange;
     });
-    setFilteredDissertations(filtered);
+    setFilteredOrders(filtered);
     setCurrentPage(1);
   }, [searchTerm, dissertations, dateRange]);
 
@@ -210,6 +211,7 @@ const Dissertations = () => {
 
       setDissertation(initialDissertationState);
       setEditingId(null);
+      setShowFormModal(false);
       await fetchDissertations();
       alert(`Dissertation ${editingId ? 'updated' : 'added'} successfully!`);
     } catch (error) {
@@ -244,7 +246,7 @@ const Dissertations = () => {
       remainingBalance: dissertationToEdit.remainingBalance || 0,
     });
     setEditingId(dissertationToEdit.id);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    setShowFormModal(true);
   };
 
   const handlePaymentUpdate = (diss) => {
@@ -285,7 +287,7 @@ const Dissertations = () => {
 
   const handleExportConfirm = () => {
     const workbook = XLSX.utils.book_new();
-    const exportData = filteredDissertations.map(({ id, ...rest }) => {
+    const exportData = filteredOrders.map(({ id, ...rest }) => {
       const row = {};
       if (selectedColumns.projectName) row['Dissertation Title'] = rest.projectName;
       if (selectedColumns.supervisorName) row['Writer'] = rest.supervisorName;
@@ -307,14 +309,10 @@ const Dissertations = () => {
     });
 
     const worksheet = XLSX.utils.json_to_sheet(exportData);
-    
-    // Calculate total amount
-    const totalAmount = filteredDissertations.reduce((sum, diss) => sum + (diss.budget || 0), 0);
-    
-    // Add total amount two rows below and two columns to the right of the last data column
-    const totalRow = filteredDissertations.length + 3; // Two rows below data (1-based indexing)
+    const totalAmount = filteredOrders.reduce((sum, diss) => sum + (diss.budget || 0), 0);
+    const totalRow = filteredOrders.length + 3;
     const lastColIndex = Object.keys(exportData[0] || {}).length - 1;
-    const totalCol = lastColIndex >= 0 ? String.fromCharCode(65 + lastColIndex + 2) : 'C'; // Two columns to the right
+    const totalCol = lastColIndex >= 0 ? String.fromCharCode(65 + lastColIndex + 2) : 'C';
     XLSX.utils.sheet_add_aoa(worksheet, [[`Total Amount: Ksh.${totalAmount.toLocaleString()}`]], { origin: `${totalCol}${totalRow}` });
 
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Dissertations');
@@ -342,7 +340,7 @@ const Dissertations = () => {
     setCurrentPage(1);
   };
 
-  const sortedDissertations = [...filteredDissertations].sort((a, b) => {
+  const sortedOrders = [...filteredOrders].sort((a, b) => {
     if (!sortColumn) return 0;
     let valueA = a[sortColumn];
     let valueB = b[sortColumn];
@@ -362,18 +360,87 @@ const Dissertations = () => {
 
   const indexOfLastRecord = currentPage * recordsPerPage;
   const indexOfFirstRecord = indexOfLastRecord - recordsPerPage;
-  const currentRecords = sortedDissertations.slice(indexOfFirstRecord, indexOfLastRecord);
-  const totalPages = Math.ceil(sortedDissertations.length / recordsPerPage);
+  const currentRecords = sortedOrders.slice(indexOfFirstRecord, indexOfLastRecord);
+  const totalPages = Math.ceil(filteredOrders.length / recordsPerPage);
 
-  const paginate = (pageNumber) => setCurrentPage(pageNumber);
+  const paginate = (pageNumber) => {
+    if (pageNumber >= 1 && pageNumber <= totalPages) {
+      setCurrentPage(pageNumber);
+    }
+  };
 
   const handleRefreshSearch = () => {
     setDateRange({ start: '', end: '' });
     setSearchTerm('');
+    setCurrentPage(1);
+  };
+
+  const handleFileUpload = (e) => setImportFile(e.target.files[0]);
+
+  const importOrders = async () => {
+    if (!importFile) {
+      alert('Please select a file to import');
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = async (event) => {
+      try {
+        const data = new Uint8Array(event.target.result);
+        const workbook = XLSX.read(data, { type: 'array' });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const importedData = XLSX.utils.sheet_to_json(sheet);
+
+        for (const diss of importedData) {
+          const budget = calculateBudget(
+            Number(diss['Word Count']) || 0,
+            Number(diss['CPP']) || 0,
+            diss['Has Code'] === 'Yes' || diss['Has Code'] === true,
+            Number(diss['Code Price']) || 10000
+          );
+          const totalPaid = Number(diss['Amount Paid']) || 0;
+          await addDoc(collection(db, 'dissertations'), {
+            projectName: diss['Dissertation Title'] || '',
+            orderDate: diss['Order Date'] || '',
+            submissionDate: diss['Submission Date'] || '',
+            supervisorName: diss['Writer'] || '',
+            season: diss['Season'] || '',
+            status: diss['Status'] || 'Pending',
+            type: 'Dissertation',
+            budget,
+            wordCount: Number(diss['Word Count']) || 0,
+            hasCode: diss['Has Code'] === 'Yes' || diss['Has Code'] === true,
+            cpp: Number(diss['CPP']) || 0,
+            codePrice: Number(diss['Code Price']) || 10000,
+            progress: Number(diss['Progress']) || 0,
+            wordsPaid: Number(diss['Words Paid']) || 0,
+            totalPaid,
+            remainingBalance: calculateRemainingBalance(budget, totalPaid),
+            datePaid: diss['Date Paid'] || '',
+            isFullyPaid: diss['Fully Paid'] === 'Yes' || diss['Fully Paid'] === true,
+          });
+        }
+
+        await fetchDissertations();
+        setShowImportModal(false);
+        setImportFile(null);
+        alert('Dissertations imported successfully!');
+      } catch (error) {
+        console.error('Error importing dissertations:', error);
+        alert('Error importing dissertations');
+      }
+    };
+    reader.readAsArrayBuffer(importFile);
   };
 
   const handleColumnToggle = (column) => {
     setSelectedColumns(prev => ({ ...prev, [column]: !prev[column] }));
+  };
+
+  const handleCloseFormModal = () => {
+    setShowFormModal(false);
+    setDissertation(initialDissertationState);
+    setEditingId(null);
   };
 
   const ganttData = [
@@ -386,7 +453,7 @@ const Dissertations = () => {
       { type: 'number', label: 'Percent Complete' },
       { type: 'string', label: 'Dependencies' },
     ],
-    ...filteredDissertations.map(diss => [
+    ...filteredOrders.map(diss => [
       diss.id,
       diss.projectName,
       new Date(diss.orderDate),
@@ -411,304 +478,189 @@ const Dissertations = () => {
   };
 
   return (
-    <Container className="py-5">
-      <Card className="mb-5 shadow-sm">
-        <Card.Body>
-          <Card.Title className="mb-4 d-flex justify-content-between align-items-center">
-            {editingId ? 'Edit Dissertation' : 'Add New Dissertation'}
-            <div>
-              <Button variant="outline-info" size="sm" onClick={() => setShowImportModal(true)} className="me-2">
-                <Upload size={16} className="me-2" />Bulk Import
-              </Button>
-              <Button variant="outline-primary" size="sm" onClick={() => setShowGanttModal(true)}>
-                <i className="bi bi-bar-chart-line me-2"></i>Gantt Chart
-              </Button>
-            </div>
-          </Card.Title>
-          <Form onSubmit={handleSubmit}>
-            <div className="row">
-              <div className="col-md-6">
-                <Form.Group className="mb-3">
-                  <Form.Label>Dissertation Title/Code*</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={dissertation.projectName}
-                    onChange={(e) => setDissertation({ ...dissertation, projectName: e.target.value })}
-                    required
-                  />
-                </Form.Group>
-              </div>
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Order Date*</Form.Label>
-                  <Form.Control
-                    type="date"
-                    value={dissertation.orderDate}
-                    onChange={(e) => setDissertation({ ...dissertation, orderDate: e.target.value })}
-                    required
-                  />
-                </Form.Group>
-              </div>
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Submission Date*</Form.Label>
-                  <Form.Control
-                    type="date"
-                    value={dissertation.submissionDate}
-                    onChange={(e) => setDissertation({ ...dissertation, submissionDate: e.target.value })}
-                    required
-                  />
-                </Form.Group>
-              </div>
-            </div>
+    <Container className="py-4">
+      <div className="mb-4 d-flex justify-content-between align-items-center">
+        <h2 className="mb-0 fw-bold">
+           <i className="bi bi-journal-bookmark-fill me-2"></i>  Dissertations 
+        </h2>
 
-            <div className="row">
-              <div className="col-md-6">
-                <Form.Group className="mb-3">
-                  <Form.Label>Writer Name*</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={dissertation.supervisorName}
-                    onChange={(e) => setDissertation({ ...dissertation, supervisorName: e.target.value })}
-                    required
-                  />
-                </Form.Group>
-              </div>
-              <div className="col-md-6">
-                <Form.Group className="mb-3">
-                  <Form.Label>Season*</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={dissertation.season}
-                    onChange={(e) => setDissertation({ ...dissertation, season: e.target.value })}
-                    required
-                  />
-                </Form.Group>
-              </div>
-            </div>
-
-            <div className="row">
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Status</Form.Label>
-                  <Form.Select
-                    value={dissertation.status}
-                    onChange={(e) => setDissertation({ ...dissertation, status: e.target.value })}
-                  >
-                    <option>Pending</option>
-                    <option>In Progress</option>
-                    <option>Completed</option>
-                  </Form.Select>
-                </Form.Group>
-              </div>
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Word Count*</Form.Label>
-                  <Form.Control
-                    type="number"
-                    value={dissertation.wordCount}
-                    onChange={handleWordCountChange}
-                    required
-                    min="0"
-                    step="1"
-                  />
-                </Form.Group>
-              </div>
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Progress (0-100%)</Form.Label>
-                  <Form.Control
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={dissertation.progress}
-                    onChange={(e) => setDissertation({ ...dissertation, progress: e.target.value })}
-                  />
-                </Form.Group>
-              </div>
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Check
-                    type="checkbox"
-                    label="Includes Code"
-                    checked={dissertation.hasCode}
-                    onChange={handleCodeToggle}
-                    className="mt-4"
-                  />
-                </Form.Group>
-              </div>
-            </div>
-
-            <div className="row">
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Cost Per Page (CPP)*</Form.Label>
-                  <Form.Control
-                    type="number"
-                    value={dissertation.cpp}
-                    onChange={(e) => handleBudgetInputChange(e, 'cpp')}
-                    required
-                    min="0"
-                    step="1"
-                  />
-                </Form.Group>
-              </div>
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Code Price*</Form.Label>
-                  <Form.Control
-                    type="number"
-                    value={dissertation.codePrice}
-                    onChange={(e) => handleBudgetInputChange(e, 'codePrice')}
-                    required
-                    min="0"
-                    step="1"
-                  />
-                </Form.Group>
-              </div>
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Total Amount</Form.Label>
-                  <Form.Control
-                    type="number"
-                    value={dissertation.budget}
-                    readOnly
-                    disabled
-                  />
-                </Form.Group>
-              </div>
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Amount Paid</Form.Label>
-                  <Form.Control
-                    type="number"
-                    value={dissertation.totalPaid}
-                    onChange={(e) => setDissertation({ 
-                      ...dissertation, 
-                      totalPaid: e.target.value,
-                      remainingBalance: calculateRemainingBalance(dissertation.budget, e.target.value)
-                    })}
-                    min="0"
-                    step="1"
-                  />
-                </Form.Group>
-              </div>
-            </div>
-
-            <div className="mt-3">
-              <Button type="submit" variant="primary" className="me-2">
-                {editingId ? 'Update Dissertation' : 'Add Dissertation'}
-              </Button>
-              {editingId && (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setDissertation(initialDissertationState);
-                    setEditingId(null);
-                  }}
-                >
-                  Cancel Edit
-                </Button>
-              )}
-            </div>
-          </Form>
-        </Card.Body>
-      </Card>
-
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h3 className="mb-0">Dissertations List</h3>
         <div className="d-flex gap-3 align-items-center">
-          <InputGroup style={{ width: '300px' }}>
-            <InputGroup.Text><Search size={20} /></InputGroup.Text>
-            <Form.Control
-              placeholder="Search dissertations..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </InputGroup>
-          <InputGroup>
-            <InputGroup.Text><Calendar size={20} /></InputGroup.Text>
-            <Form.Control
-              type="date"
-              value={dateRange.start}
-              onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-              placeholder="Start Date"
-            />
-            <Form.Control
-              type="date"
-              value={dateRange.end}
-              onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-              placeholder="End Date"
-            />
-            <Button variant="outline-secondary" onClick={handleRefreshSearch} title="Reset Filters">
-              <RefreshCw size={18} className="me-2" />Reset
-            </Button>
-          </InputGroup>
-          <Form.Select
-            style={{ width: '100px' }}
-            value={recordsPerPage}
-            onChange={(e) => {
-              setRecordsPerPage(Number(e.target.value));
-              setCurrentPage(1);
-            }}
+          <Button 
+            variant="primary" 
+            onClick={() => setShowFormModal(true)}
+            className="px-4 py-2"
           >
-            <option value={5}>5</option>
-            <option value={10}>10</option>
-            <option value={15}>15</option>
-            <option value={20}>20</option>
-          </Form.Select>
-          <Button variant="success" onClick={exportToExcel}>
-            Export to Excel
+            <i className="bi bi-plus-circle me-2"></i>Add a New Dissertation
+          </Button>
+          <Button 
+            variant="outline-info" 
+            onClick={() => setShowImportModal(true)}
+            className="px-4 py-2"
+          >
+            <Upload size={16} className="me-2" />Import Existing Dissertations
+          </Button>
+          <Button 
+            variant="outline-success" 
+            onClick={exportToExcel}
+            className="px-4 py-2"
+          >
+            <i className="bi bi-download me-2"></i>Export to Excel
+          </Button>
+          <Button 
+            variant="outline-primary" 
+            onClick={() => setShowGanttModal(true)}
+            className="px-4 py-2"
+          >
+            <i className="bi bi-bar-chart-line me-2"></i>Gantt Chart
           </Button>
         </div>
       </div>
 
+      <Card className="shadow-sm mb-4">
+        <Card.Body>
+          <div className="d-flex flex-wrap gap-4 align-items-center">
+            <InputGroup style={{ width: '250px' }}>
+              <InputGroup.Text className="bg-light">
+                <Search size={18} />
+              </InputGroup.Text>
+              <Form.Control
+                placeholder="Search dissertations..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="border-start-0"
+              />
+            </InputGroup>
+            <InputGroup style={{ width: '350px' }}>
+              <InputGroup.Text className="bg-light">
+                <Calendar size={18} />
+              </InputGroup.Text>
+              <Form.Control
+                type="date"
+                value={dateRange.start}
+                onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                placeholder="Start Date"
+                className="border-start-0"
+                style={{ width: '150px' }}
+              />
+              <Form.Control
+                type="date"
+                value={dateRange.end}
+                onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                placeholder="End Date"
+                style={{ width: '150px' }}
+              />
+            </InputGroup>
+            <Button 
+              variant="outline-secondary" 
+              onClick={handleRefreshSearch}
+              title="Reset Filters"
+              className="px-3 py-2"
+            >
+              <RefreshCw size={18} />
+            </Button>
+            <Form.Select
+              style={{ width: '150px' }}
+              value={recordsPerPage}
+              onChange={(e) => {
+                setRecordsPerPage(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+            >
+              <option value={5}>5 per page</option>
+              <option value={10}>10 per page</option>
+              <option value={15}>15 per page</option>
+              <option value={20}>20 per page</option>
+            </Form.Select>
+          </div>
+        </Card.Body>
+      </Card>
+
       <div className="table-responsive">
-        <Table striped bordered hover className="shadow-sm">
-          <thead className="table-dark">
+        <Table bordered striped hover className="shadow-sm align-middle">
+          <thead className="bg-primary text-white">
             <tr>
-              <th>#</th>
-              <th onClick={() => handleSort('projectName')} style={{ cursor: 'pointer' }}>
+              <th className="py-3" style={{ width: '50px' }}>#</th>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('projectName')} 
+                style={{ cursor: 'pointer' }}
+              >
                 Dissertation Title{' '}
-                {sortColumn === 'projectName' && <ArrowUpDown size={16} className="ms-1" />}
+                {sortColumn === 'projectName' && <ArrowUpDown size={14} />}
               </th>
-              <th onClick={() => handleSort('supervisorName')} style={{ cursor: 'pointer' }}>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('supervisorName')} 
+                style={{ cursor: 'pointer' }}
+              >
                 Writer{' '}
-                {sortColumn === 'supervisorName' && <ArrowUpDown size={16} className="ms-1" />}
+                {sortColumn === 'supervisorName' && <ArrowUpDown size={14} />}
               </th>
-              <th onClick={() => handleSort('status')} style={{ cursor: 'pointer' }}>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('status')} 
+                style={{ cursor: 'pointer' }}
+              >
                 Status{' '}
-                {sortColumn === 'status' && <ArrowUpDown size={16} className="ms-1" />}
+                {sortColumn === 'status' && <ArrowUpDown size={14} />}
               </th>
-              <th onClick={() => handleSort('season')} style={{ cursor: 'pointer' }}>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('season')} 
+                style={{ cursor: 'pointer' }}
+              >
                 Season{' '}
-                {sortColumn === 'season' && <ArrowUpDown size={16} className="ms-1" />}
+                {sortColumn === 'season' && <ArrowUpDown size={14} />}
               </th>
-              <th onClick={() => handleSort('hasCode')} style={{ cursor: 'pointer' }}>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('hasCode')} 
+                style={{ cursor: 'pointer' }}
+              >
                 Has Code{' '}
-                {sortColumn === 'hasCode' && <ArrowUpDown size={16} className="ms-1" />}
+                {sortColumn === 'hasCode' && <ArrowUpDown size={14} />}
               </th>
-              <th onClick={() => handleSort('budget')} style={{ cursor: 'pointer' }}>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('budget')} 
+                style={{ cursor: 'pointer' }}
+              >
                 Total Amount{' '}
-                {sortColumn === 'budget' && <ArrowUpDown size={16} className="ms-1" />}
+                {sortColumn === 'budget' && <ArrowUpDown size={14} />}
               </th>
-              <th onClick={() => handleSort('totalPaid')} style={{ cursor: 'pointer' }}>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('totalPaid')} 
+                style={{ cursor: 'pointer' }}
+              >
                 Amount Paid{' '}
-                {sortColumn === 'totalPaid' && <ArrowUpDown size={16} className="ms-1" />}
+                {sortColumn === 'totalPaid' && <ArrowUpDown size={14} />}
               </th>
-              <th onClick={() => handleSort('remainingBalance')} style={{ cursor: 'pointer' }}>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('remainingBalance')} 
+                style={{ cursor: 'pointer' }}
+              >
                 Balance{' '}
-                {sortColumn === 'remainingBalance' && <ArrowUpDown size={16} className="ms-1" />}
+                {sortColumn === 'remainingBalance' && <ArrowUpDown size={14} />}
               </th>
-              <th onClick={() => handleSort('progress')} style={{ cursor: 'pointer' }}>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('progress')} 
+                style={{ cursor: 'pointer' }}
+              >
                 Progress{' '}
-                {sortColumn === 'progress' && <ArrowUpDown size={16} className="ms-1" />}
+                {sortColumn === 'progress' && <ArrowUpDown size={14} />}
               </th>
-              <th onClick={() => handleSort('submissionDate')} style={{ cursor: 'pointer' }}>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('submissionDate')} 
+                style={{ cursor: 'pointer' }}
+              >
                 Submission Date{' '}
-                {sortColumn === 'submissionDate' && <ArrowUpDown size={16} className="ms-1" />}
+                {sortColumn === 'submissionDate' && <ArrowUpDown size={14} />}
               </th>
-              <th>Actions</th>
+              <th className="py-3">Actions</th>
             </tr>
           </thead>
           <tbody>
@@ -750,35 +702,35 @@ const Dissertations = () => {
                       now={diss.progress}
                       label={`${diss.progress}%`}
                       variant={diss.progress >= 75 ? 'success' : diss.progress >= 50 ? 'warning' : 'danger'}
-                      style={{ height: '20px', cursor: 'pointer' }}
+                      style={{ height: '16px', cursor: 'pointer' }}
                     />
                   </OverlayTrigger>
                 </td>
                 <td>{new Date(diss.submissionDate).toLocaleDateString()}</td>
                 <td>
                   <Button
-                    variant="info"
+                    variant="outline-info"
                     size="sm"
                     onClick={() => handlePaymentUpdate(diss)}
-                    className="me-1"
+                    className="me-2"
                     title="Update Payment"
                   >
                     <DollarSign size={14} />
                   </Button>
                   <Button
-                    variant="warning"
+                    variant="outline-warning"
                     size="sm"
                     onClick={() => handleEdit(diss)}
-                    className="me-1"
+                    className="me-2"
                   >
                     <Edit3 size={14} />
                   </Button>
                   <Button
-                    variant="danger"
+                    variant="outline-danger"
                     size="sm"
                     onClick={() => handleDelete(diss.id)}
                   >
-                    Delete
+                    <i className="bi bi-trash"></i>
                   </Button>
                 </td>
               </tr>
@@ -787,34 +739,250 @@ const Dissertations = () => {
         </Table>
       </div>
 
-      {filteredDissertations.length > recordsPerPage && (
-        <div className="d-flex justify-content-between align-items-center mt-3">
-          <div>
-            Showing {indexOfFirstRecord + 1} to {Math.min(indexOfLastRecord, filteredDissertations.length)} of {filteredDissertations.length} dissertations
+      {filteredOrders.length > 0 && (
+        <div className="d-flex justify-content-between align-items-center mt-4">
+          <div className="text-muted">
+            Showing {indexOfFirstRecord + 1} to {Math.min(indexOfLastRecord, filteredOrders.length)} of {filteredOrders.length} dissertations
           </div>
-          <nav>
-            <ul className="pagination mb-0">
-              <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
-                <Button variant="outline-primary" size="sm" onClick={() => paginate(currentPage - 1)} disabled={currentPage === 1}>
-                  Previous
-                </Button>
-              </li>
-              {[...Array(totalPages)].map((_, i) => (
-                <li key={i + 1} className={`page-item ${currentPage === i + 1 ? 'active' : ''}`}>
-                  <Button variant={currentPage === i + 1 ? 'primary' : 'outline-primary'} size="sm" onClick={() => paginate(i + 1)}>
-                    {i + 1}
-                  </Button>
-                </li>
-              ))}
-              <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
-                <Button variant="outline-primary" size="sm" onClick={() => paginate(currentPage + 1)} disabled={currentPage === totalPages}>
-                  Next
-                </Button>
-              </li>
-            </ul>
-          </nav>
+          <div className="d-flex align-items-center gap-3">
+            <Button
+              variant="outline-primary"
+              size="sm"
+              onClick={() => paginate(currentPage - 1)}
+              disabled={currentPage === 1}
+              className="px-4 py-2"
+            >
+              Previous
+            </Button>
+            <span className="text-muted">
+              Page {currentPage} of {totalPages}
+            </span>
+            <Button
+              variant="outline-primary"
+              size="sm"
+              onClick={() => paginate(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              className="px-4 py-2"
+            >
+              Next
+            </Button>
+          </div>
         </div>
       )}
+
+      {/* Form Modal */}
+      <Modal show={showFormModal} onHide={handleCloseFormModal} size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>{editingId ? 'Edit Dissertation' : 'Add New Dissertation'}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form onSubmit={handleSubmit}>
+            <div className="row g-3">
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label>Dissertation Title/Code <span className="text-danger">*</span></Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={dissertation.projectName}
+                    onChange={(e) => setDissertation({ ...dissertation, projectName: e.target.value })}
+                    required
+                  />
+                </Form.Group>
+              </div>
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label>Season <span className="text-danger">*</span></Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={dissertation.season}
+                    onChange={(e) => setDissertation({ ...dissertation, season: e.target.value })}
+                    required
+                  />
+                </Form.Group>
+              </div>
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label>Order Date <span className="text-danger">*</span></Form.Label>
+                  <Form.Control
+                    type="date"
+                    value={dissertation.orderDate}
+                    onChange={(e) => setDissertation({ ...dissertation, orderDate: e.target.value })}
+                    required
+                  />
+                </Form.Group>
+              </div>
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label>Submission Date <span className="text-danger">*</span></Form.Label>
+                  <Form.Control
+                    type="date"
+                    value={dissertation.submissionDate}
+                    onChange={(e) => setDissertation({ ...dissertation, submissionDate: e.target.value })}
+                    required
+                  />
+                </Form.Group>
+              </div>
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label>Writer <span className="text-danger">*</span></Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={dissertation.supervisorName}
+                    onChange={(e) => setDissertation({ ...dissertation, supervisorName: e.target.value })}
+                    required
+                  />
+                </Form.Group>
+              </div>
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label>Status</Form.Label>
+                  <Form.Select
+                    value={dissertation.status}
+                    onChange={(e) => setDissertation({ ...dissertation, status: e.target.value })}
+                  >
+                    <option value="Pending">Pending</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Completed">Completed</option>
+                  </Form.Select>
+                </Form.Group>
+              </div>
+              <div className="col-md-4">
+                <Form.Group>
+                  <Form.Label>Word Count <span className="text-danger">*</span></Form.Label>
+                  <Form.Control
+                    type="number"
+                    value={dissertation.wordCount}
+                    onChange={handleWordCountChange}
+                    required
+                    min="0"
+                    step="1"
+                  />
+                </Form.Group>
+              </div>
+              <div className="col-md-4">
+                <Form.Group>
+                  <Form.Label>Cost Per Page <span className="text-danger">*</span></Form.Label>
+                  <InputGroup>
+                    <InputGroup.Text>Ksh.</InputGroup.Text>
+                    <Form.Control
+                      type="number"
+                      value={dissertation.cpp}
+                      onChange={(e) => handleBudgetInputChange(e, 'cpp')}
+                      required
+                      min="0"
+                      step="1"
+                    />
+                  </InputGroup>
+                </Form.Group>
+              </div>
+              <div className="col-md-4">
+                <Form.Group>
+                  <Form.Label>Code Price <span className="text-danger">*</span></Form.Label>
+                  <InputGroup>
+                    <InputGroup.Text>Ksh.</InputGroup.Text>
+                    <Form.Control
+                      type="number"
+                      value={dissertation.codePrice}
+                      onChange={(e) => handleBudgetInputChange(e, 'codePrice')}
+                      required
+                      min="0"
+                      step="1"
+                    />
+                  </InputGroup>
+                </Form.Group>
+              </div>
+              <div className="col-md-4">
+                <Form.Group>
+                  <Form.Check
+                    type="checkbox"
+                    label="Includes Code"
+                    checked={dissertation.hasCode}
+                    onChange={handleCodeToggle}
+                    className="mt-4"
+                  />
+                </Form.Group>
+              </div>
+              <div className="col-md-4">
+                <Form.Group>
+                  <Form.Label>Total Amount</Form.Label>
+                  <InputGroup>
+                    <InputGroup.Text>Ksh.</InputGroup.Text>
+                    <Form.Control
+                      type="number"
+                      value={dissertation.budget}
+                      readOnly
+                      disabled
+                    />
+                  </InputGroup>
+                </Form.Group>
+              </div>
+              <div className="col-md-4">
+                <Form.Group>
+                  <Form.Label>Amount Paid</Form.Label>
+                  <InputGroup>
+                    <InputGroup.Text>Ksh.</InputGroup.Text>
+                    <Form.Control
+                      type="number"
+                      value={dissertation.totalPaid}
+                      onChange={(e) => setDissertation({ 
+                        ...dissertation, 
+                        totalPaid: e.target.value,
+                        remainingBalance: calculateRemainingBalance(dissertation.budget, e.target.value)
+                      })}
+                      min="0"
+                      step="1"
+                    />
+                  </InputGroup>
+                </Form.Group>
+              </div>
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label>Progress (0-100%)</Form.Label>
+                  <InputGroup>
+                    <Form.Control
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={dissertation.progress}
+                      onChange={(e) => setDissertation({ ...dissertation, progress: e.target.value })}
+                    />
+                    <InputGroup.Text>%</InputGroup.Text>
+                  </InputGroup>
+                </Form.Group>
+              </div>
+              <div className="col-md-3">
+                <Form.Group className="mb-3">
+                  <Form.Label>Words Paid</Form.Label>
+                  <Form.Control
+                    type="number"
+                    value={dissertation.wordsPaid}
+                    onChange={(e) => setDissertation({ ...dissertation, wordsPaid: e.target.value })}
+                    min="0"
+                  />
+                </Form.Group>
+              </div>
+              <div className="col-md-3">
+                <Form.Group className="mb-3">
+                  <Form.Label>Date Paid</Form.Label>
+                  <Form.Control
+                    type="date"
+                    value={dissertation.datePaid}
+                    onChange={(e) => setDissertation({ ...dissertation, datePaid: e.target.value })}
+                  />
+                </Form.Group>
+              </div>
+            </div>
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleCloseFormModal}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleSubmit}>
+            {editingId ? 'Update Dissertation' : 'Add Dissertation'}
+          </Button>
+        </Modal.Footer>
+      </Modal>
 
       {/* Payment Update Modal */}
       <Modal show={showPaymentModal} onHide={() => setShowPaymentModal(false)}>
@@ -823,9 +991,9 @@ const Dissertations = () => {
         </Modal.Header>
         <Modal.Body>
           <Form>
-            <div className="row">
+            <div className="row g-3">
               <div className="col-md-6">
-                <Form.Group className="mb-3">
+                <Form.Group>
                   <Form.Label>Words Paid</Form.Label>
                   <Form.Control
                     type="number"
@@ -836,7 +1004,7 @@ const Dissertations = () => {
                 </Form.Group>
               </div>
               <div className="col-md-6">
-                <Form.Group className="mb-3">
+                <Form.Group>
                   <Form.Label>Amount Paid (Ksh)</Form.Label>
                   <Form.Control
                     type="number"
@@ -846,10 +1014,8 @@ const Dissertations = () => {
                   />
                 </Form.Group>
               </div>
-            </div>
-            <div className="row">
               <div className="col-md-6">
-                <Form.Group className="mb-3">
+                <Form.Group>
                   <Form.Label>Date Paid</Form.Label>
                   <Form.Control
                     type="date"
@@ -859,7 +1025,7 @@ const Dissertations = () => {
                 </Form.Group>
               </div>
               <div className="col-md-6">
-                <Form.Group className="mb-3">
+                <Form.Group>
                   <Form.Check
                     type="checkbox"
                     label="Fully Paid"
@@ -869,14 +1035,14 @@ const Dissertations = () => {
                   />
                 </Form.Group>
               </div>
+              {selectedDissertation && (
+                <div className="mt-3 p-3 bg-light rounded">
+                  <h6>Payment Summary:</h6>
+                  <p><strong>Total Amount:</strong> Ksh.${selectedDissertation.budget?.toLocaleString() ?? 0}</p>
+                  <p><strong>Remaining Balance:</strong> Ksh.${calculateRemainingBalance(selectedDissertation.budget, paymentData.amountPaid)?.toLocaleString() ?? 0}</p>
+                </div>
+              )}
             </div>
-            {selectedDissertation && (
-              <div className="mt-3 p-3 bg-light rounded">
-                <h6>Payment Summary:</h6>
-                <p><strong>Total Amount:</strong> Ksh.{selectedDissertation.budget?.toLocaleString()}</p>
-                <p><strong>Current Balance:</strong> Ksh.{calculateRemainingBalance(selectedDissertation.budget, paymentData.amountPaid)?.toLocaleString()}</p>
-              </div>
-            )}
           </Form>
         </Modal.Body>
         <Modal.Footer>
@@ -890,7 +1056,7 @@ const Dissertations = () => {
       </Modal>
 
       {/* Gantt Chart Modal */}
-      <Modal show={showGanttModal} onHide={() => setShowGanttModal(false)} size="xl">
+      <Modal show={showGanttModal} onHide={() => setShowGanttModal(false)} size="lg">
         <Modal.Header closeButton>
           <Modal.Title>Dissertation Timeline (Gantt Chart)</Modal.Title>
         </Modal.Header>
@@ -921,7 +1087,7 @@ const Dissertations = () => {
             <Form.Control
               type="file"
               accept=".xlsx, .xls"
-              onChange={(e) => setImportFile(e.target.files[0])}
+              onChange={handleFileUpload}
             />
             <small className="text-muted">
               File should have columns: Dissertation Title, Order Date, Submission Date, Writer, Season, Status, Word Count, CPP, Code Price, Has Code, Progress, Amount Paid, Words Paid, Date Paid, Fully Paid
@@ -932,61 +1098,7 @@ const Dissertations = () => {
           <Button variant="secondary" onClick={() => setShowImportModal(false)}>
             Cancel
           </Button>
-          <Button variant="primary" onClick={async () => {
-            if (!importFile) {
-              alert('Please select a file to import');
-              return;
-            }
-
-            const reader = new FileReader();
-            reader.onload = async (event) => {
-              try {
-                const data = new Uint8Array(event.target.result);
-                const workbook = XLSX.read(data, { type: 'array' });
-                const sheet = workbook.Sheets[workbook.SheetNames[0]];
-                const importedData = XLSX.utils.sheet_to_json(sheet);
-
-                for (const diss of importedData) {
-                  const budget = calculateBudget(
-                    Number(diss['Word Count']) || 0,
-                    Number(diss['CPP']) || 0,
-                    diss['Has Code'] === 'Yes' || diss['Has Code'] === true,
-                    Number(diss['Code Price']) || 10000
-                  );
-                  const totalPaid = Number(diss['Amount Paid']) || 0;
-                  await addDoc(collection(db, 'dissertations'), {
-                    projectName: diss['Dissertation Title'] || '',
-                    orderDate: diss['Order Date'] || '',
-                    submissionDate: diss['Submission Date'] || '',
-                    supervisorName: diss['Writer'] || '',
-                    season: diss['Season'] || '',
-                    status: diss['Status'] || 'Pending',
-                    type: 'Dissertation',
-                    budget,
-                    wordCount: Number(diss['Word Count']) || 0,
-                    hasCode: diss['Has Code'] === 'Yes' || diss['Has Code'] === true,
-                    cpp: Number(diss['CPP']) || 0,
-                    codePrice: Number(diss['Code Price']) || 10000,
-                    progress: Number(diss['Progress']) || 0,
-                    wordsPaid: Number(diss['Words Paid']) || 0,
-                    totalPaid,
-                    remainingBalance: calculateRemainingBalance(budget, totalPaid),
-                    datePaid: diss['Date Paid'] || '',
-                    isFullyPaid: diss['Fully Paid'] === 'Yes' || diss['Fully Paid'] === true,
-                  });
-                }
-
-                await fetchDissertations();
-                setShowImportModal(false);
-                setImportFile(null);
-                alert('Dissertations imported successfully!');
-              } catch (error) {
-                console.error('Error importing dissertations:', error);
-                alert('Error importing dissertations');
-              }
-            };
-            reader.readAsArrayBuffer(importFile);
-          }}>
+          <Button variant="primary" onClick={importOrders}>
             Import
           </Button>
         </Modal.Footer>
@@ -1005,14 +1117,15 @@ const Dissertations = () => {
                 type="checkbox"
                 label={column === 'supervisorName' ? 'Writer' : 
                       column === 'projectName' ? 'Dissertation Title' : 
-                      column === 'budget' ? 'Total Amount' : 
+                      column === 'budget' ? "Total Paid" : 
                       column === 'totalPaid' ? 'Amount Paid' : 
-                      column === 'remainingBalance' ? 'Balance' : 
+                      column === 'remainingBalance' ? 'Paid' : 
                       column === 'isFullyPaid' ? 'Fully Paid' : 
                       column === 'datePaid' ? 'Date Paid' : 
                       column.charAt(0).toUpperCase() + column.slice(1)}
                 checked={selectedColumns[column]}
                 onChange={() => handleColumnToggle(column)}
+                className="mb-2"
               />
             ))}
           </Form>
