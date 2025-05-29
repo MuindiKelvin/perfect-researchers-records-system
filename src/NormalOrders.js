@@ -29,10 +29,27 @@ const NormalOrders = () => {
   const [recordsPerPage, setRecordsPerPage] = useState(5);
   const [filteredOrders, setFilteredOrders] = useState([]);
   const [dateRange, setDateRange] = useState({ start: '', end: '' });
-  const [sortColumn, setSortColumn] = useState('');
+  const [sortColumn, setSortColumn] = useState('status');
   const [sortDirection, setSortDirection] = useState('asc');
   const [showImportModal, setShowImportModal] = useState(false);
   const [importFile, setImportFile] = useState(null);
+  const [showExportModal, setShowExportModal] = useState(false);
+  const [showFormModal, setShowFormModal] = useState(false);
+  const [selectedColumns, setSelectedColumns] = useState({
+    projectName: true,
+    supervisorName: true,
+    orderDate: true,
+    submissionDate: true,
+    status: true,
+    season: true,
+    budget: true,
+    wordCount: true,
+    hasCode: true,
+    cpp: true,
+    codePrice: true,
+    progress: true,
+    isOverdue: true
+  });
 
   useEffect(() => {
     fetchOrders();
@@ -146,6 +163,7 @@ const NormalOrders = () => {
 
       setOrder(initialOrderState);
       setEditingId(null);
+      setShowFormModal(false);
       await fetchOrders();
       alert(`Order ${editingId ? 'updated' : 'added'} successfully!`);
     } catch (error) {
@@ -177,26 +195,45 @@ const NormalOrders = () => {
       progress: orderToEdit.progress || 0,
     });
     setEditingId(orderToEdit.id);
+    setShowFormModal(true);
   };
 
   const exportToExcel = () => {
+    setShowExportModal(true);
+  };
+
+  const handleExportConfirm = () => {
     const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.json_to_sheet(
-      filteredOrders.map(({ id, ...rest }) => ({
-        ...rest,
-        orderDate: new Date(rest.orderDate).toLocaleDateString(),
-        submissionDate: new Date(rest.submissionDate).toLocaleDateString(),
-        budget: `Ksh.${rest.budget?.toLocaleString() ?? 0}`,
-        wordCount: rest.wordCount?.toLocaleString() ?? '0',
-        hasCode: rest.hasCode ? 'Yes' : 'No',
-        cpp: `Ksh.${rest.cpp?.toLocaleString() ?? 0}`,
-        codePrice: `Ksh.${rest.codePrice?.toLocaleString() ?? 0}`,
-        progress: `${rest.progress}%`,
-        isOverdue: isOverdue(rest.orderDate, rest.submissionDate, rest.status) ? 'Yes' : 'No',
-      }))
-    );
+    const exportData = filteredOrders.map(({ id, ...rest }) => {
+      const row = {};
+      if (selectedColumns.projectName) row['Project Name'] = rest.projectName;
+      if (selectedColumns.supervisorName) row['Writer'] = rest.supervisorName;
+      if (selectedColumns.orderDate) row['Order Date'] = new Date(rest.orderDate).toLocaleDateString();
+      if (selectedColumns.submissionDate) row['Due Date'] = new Date(rest.submissionDate).toLocaleDateString();
+      if (selectedColumns.status) row['Status'] = rest.status;
+      if (selectedColumns.season) row['Season'] = rest.season;
+      if (selectedColumns.budget) row['Total Amount'] = `Ksh.${rest.budget?.toLocaleString() ?? 0}`;
+      if (selectedColumns.wordCount) row['Word Count'] = rest.wordCount?.toLocaleString() ?? '0';
+      if (selectedColumns.hasCode) row['Has Code'] = rest.hasCode ? 'Yes' : 'No';
+      if (selectedColumns.cpp) row['CPP'] = `Ksh.${rest.cpp?.toLocaleString() ?? 0}`;
+      if (selectedColumns.codePrice) row['Code Price'] = `Ksh.${rest.codePrice?.toLocaleString() ?? 0}`;
+      if (selectedColumns.progress) row['Progress'] = `${rest.progress}%`;
+      if (selectedColumns.isOverdue) row['Overdue Status'] = isOverdue(rest.orderDate, rest.submissionDate, rest.status) ? 'Yes' : 'No';
+      return row;
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    
+    const totalAmount = filteredOrders.reduce((sum, ord) => sum + (ord.budget || 0), 0);
+    
+    const totalRow = filteredOrders.length + 3;
+    const lastColIndex = Object.keys(exportData[0] || {}).length - 1;
+    const totalCol = lastColIndex >= 0 ? String.fromCharCode(65 + lastColIndex + 2) : 'C';
+    XLSX.utils.sheet_add_aoa(worksheet, [[`Total Amount: Ksh.${totalAmount.toLocaleString()}`]], { origin: `${totalCol}${totalRow}` });
+
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Normal Orders');
     XLSX.writeFile(workbook, `normal_orders_${new Date().toISOString().split('T')[0]}.xlsx`);
+    setShowExportModal(false);
   };
 
   const isOverdue = (orderDate, submissionDate, status) => {
@@ -216,6 +253,17 @@ const NormalOrders = () => {
     }
   };
 
+  const getPriorityScore = (order) => {
+    const today = new Date();
+    const submissionDate = new Date(order.submissionDate);
+    const daysUntilDue = (submissionDate - today) / (1000 * 60 * 60 * 24);
+    
+    if (order.status === 'Completed') return 3; // Lowest priority
+    if (isOverdue(order.orderDate, order.submissionDate, order.status)) return 0; // Highest priority for overdue
+    if (daysUntilDue <= 3) return 1; // High priority for near-due (within 3 days)
+    return 2; // Normal priority
+  };
+
   const handleSort = (column) => {
     if (sortColumn === column) {
       setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
@@ -227,7 +275,21 @@ const NormalOrders = () => {
   };
 
   const sortedOrders = [...filteredOrders].sort((a, b) => {
-    if (!sortColumn) return 0;
+    if (sortColumn === 'status') {
+      // Primary sort by priority score
+      const priorityA = getPriorityScore(a);
+      const priorityB = getPriorityScore(b);
+      
+      if (priorityA !== priorityB) {
+        return sortDirection === 'asc' ? priorityA - priorityB : priorityB - priorityA;
+      }
+      
+      // Secondary sort by submission date for same priority
+      const dateA = new Date(a.submissionDate);
+      const dateB = new Date(b.submissionDate);
+      return sortDirection === 'asc' ? dateA - dateB : dateB - dateA;
+    }
+
     let valueA = a[sortColumn];
     let valueB = b[sortColumn];
 
@@ -249,11 +311,16 @@ const NormalOrders = () => {
   const currentRecords = sortedOrders.slice(indexOfFirstRecord, indexOfLastRecord);
   const totalPages = Math.ceil(sortedOrders.length / recordsPerPage);
 
-  const paginate = (pageNumber) => setCurrentPage(pageNumber);
+  const paginate = (pageNumber) => {
+    if (pageNumber >= 1 && pageNumber <= totalPages) {
+      setCurrentPage(pageNumber);
+    }
+  };
 
   const handleRefreshSearch = () => {
     setDateRange({ start: '', end: '' });
     setSearchTerm('');
+    setCurrentPage(1);
   };
 
   const handleFileUpload = (e) => setImportFile(e.target.files[0]);
@@ -282,7 +349,7 @@ const NormalOrders = () => {
           await addDoc(collection(db, 'normalOrders'), {
             projectName: ord['Project Name'] || '',
             orderDate: ord['Order Date'] || '',
-            submissionDate: ord['Submission Date'] || '',
+            submissionDate: ord['Due Date'] || '',
             supervisorName: ord['Writer'] || '',
             season: ord['Season'] || '',
             status: ord['Status'] || 'Pending',
@@ -307,21 +374,252 @@ const NormalOrders = () => {
     reader.readAsArrayBuffer(importFile);
   };
 
+  const handleColumnToggle = (column) => {
+    setSelectedColumns(prev => ({ ...prev, [column]: !prev[column] }));
+  };
+
+  const handleCloseFormModal = () => {
+    setShowFormModal(false);
+    setOrder(initialOrderState);
+    setEditingId(null);
+  };
+
   return (
-    <Container className="py-5">
-      <Card className="mb-5 shadow-sm">
+    <Container className="py-4">
+      <div className="mb-4 d-flex justify-content-between align-items-center">
+        <h2 className="mb-0 fw-bold">📋 Normal Orders</h2>
+        <div className="d-flex gap-3 align-items-center">
+          <Button 
+            variant="primary" 
+            onClick={() => setShowFormModal(true)}
+            className="px-4 py-2"
+          >
+            <i className="bi bi-plus-circle me-2"></i>New Project
+          </Button>
+          <Button 
+            variant="outline-info" 
+            onClick={() => setShowImportModal(true)}
+            className="px-4 py-2"
+          >
+            <Upload size={16} className="me-2" />Import
+          </Button>
+          <Button 
+            variant="outline-success" 
+            onClick={exportToExcel}
+            className="px-4 py-2"
+          >
+            <i className="bi bi-download me-2"></i>Export
+          </Button>
+        </div>
+      </div>
+
+      <Card className="shadow-sm mb-4">
         <Card.Body>
-          <Card.Title className="mb-4 d-flex justify-content-between align-items-center">
-            {editingId ? 'Edit Normal Order' : 'Add New Normal Order'}
-            <Button variant="outline-info" size="sm" onClick={() => setShowImportModal(true)}>
-              <Upload size={16} className="me-2" />Bulk Import
+          <div className="d-flex flex-wrap gap-4 align-items-center">
+            <InputGroup style={{ width: '250px' }}>
+              <InputGroup.Text className="bg-light">
+                <Search size={18} />
+              </InputGroup.Text>
+              <Form.Control
+                placeholder="Search projects..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="border-start-0"
+              />
+            </InputGroup>
+            <InputGroup style={{ width: '350px' }}>
+              <InputGroup.Text className="bg-light">
+                <Calendar size={18} />
+              </InputGroup.Text>
+              <Form.Control
+                type="date"
+                value={dateRange.start}
+                onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
+                placeholder="Start Date"
+                className="border-start-0"
+                style={{ width: '150px' }}
+              />
+              <Form.Control
+                type="date"
+                value={dateRange.end}
+                onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
+                placeholder="End Date"
+                style={{ width: '150px' }}
+              />
+            </InputGroup>
+            <Button 
+              variant="outline-secondary" 
+              onClick={handleRefreshSearch}
+              title="Reset Filters"
+              className="px-3 py-2"
+            >
+              <RefreshCw size={18} />
             </Button>
-          </Card.Title>
+            <Form.Select
+              style={{ width: '150px' }}
+              value={recordsPerPage}
+              onChange={(e) => {
+                setRecordsPerPage(Number(e.target.value));
+                setCurrentPage(1);
+              }}
+            >
+              <option value={5}>5 per page</option>
+              <option value={10}>10 per page</option>
+              <option value={15}>15 per page</option>
+              <option value={20}>20 per page</option>
+            </Form.Select>
+          </div>
+        </Card.Body>
+      </Card>
+
+      <div className="table-responsive">
+        <Table bordered striped hover className="shadow-sm align-middle">
+          <thead className="bg-primary text-white">
+            <tr>
+              <th className="py-3" style={{ width: '50px' }}>#</th>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('projectName')} 
+                style={{ cursor: 'pointer' }}
+              >
+                Project{' '}
+                {sortColumn === 'projectName' && <ArrowUpDown size={14} />}
+              </th>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('supervisorName')} 
+                style={{ cursor: 'pointer' }}
+              >
+                Assigned To{' '}
+                {sortColumn === 'supervisorName' && <ArrowUpDown size={14} />}
+              </th>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('submissionDate')} 
+                style={{ cursor: 'pointer' }}
+              >
+                Due Date{' '}
+                {sortColumn === 'submissionDate' && <ArrowUpDown size={14} />}
+              </th>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('status')} 
+                style={{ cursor: 'pointer' }}
+              >
+                Status{' '}
+                {sortColumn === 'status' && <ArrowUpDown size={14} />}
+              </th>
+              <th 
+                className="py-3" 
+                onClick={() => handleSort('budget')} 
+                style={{ cursor: 'pointer' }}
+              >
+                Budget{' '}
+                {sortColumn === 'budget' && <ArrowUpDown size={14} />}
+              </th>
+              <th className="py-3">Progress</th>
+              <th className="py-3">Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {currentRecords.map((ord, index) => (
+              <tr key={ord.id} className={isOverdue(ord.orderDate, ord.submissionDate, ord.status) ? 'table-warning' : ''}>
+                <td>{indexOfFirstRecord + index + 1}</td>
+                <td>
+                  <div className="fw-medium">{ord.projectName}</div>
+                  <small className="text-muted">{ord.season}</small>
+                </td>
+                <td>{ord.supervisorName}</td>
+                <td>
+                  {new Date(ord.submissionDate).toLocaleDateString()}
+                  {isOverdue(ord.orderDate, ord.submissionDate, ord.status) && (
+                    <Badge bg="danger" className="ms-2">Overdue</Badge>
+                  )}
+                </td>
+                <td>
+                  <Badge bg={getStatusBadgeVariant(ord.status, ord.orderDate, ord.submissionDate)}>
+                    {ord.status}
+                  </Badge>
+                </td>
+                <td>Ksh.{ord.budget?.toLocaleString() ?? 0}</td>
+                <td>
+                  <OverlayTrigger
+                    placement="top"
+                    overlay={<Tooltip>Progress: {ord.progress}%</Tooltip>}
+                  >
+                    <ProgressBar
+                      now={ord.progress}
+                      label={`${ord.progress}%`}
+                      variant={ord.progress >= 75 ? 'success' : ord.progress >= 50 ? 'warning' : 'danger'}
+                      style={{ height: '16px', cursor: 'pointer' }}
+                    />
+                  </OverlayTrigger>
+                </td>
+                <td>
+                  <Button
+                    variant="outline-warning"
+                    size="sm"
+                    onClick={() => handleEdit(ord)}
+                    className="me-2"
+                  >
+                    <i className="bi bi-pencil"></i>
+                  </Button>
+                  <Button
+                    variant="outline-danger"
+                    size="sm"
+                    onClick={() => handleDelete(ord.id)}
+                  >
+                    <i className="bi bi-trash"></i>
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </Table>
+      </div>
+
+      {filteredOrders.length > 0 && (
+        <div className="d-flex justify-content-between align-items-center mt-4">
+          <div className="text-muted">
+            Showing {indexOfFirstRecord + 1} to {Math.min(indexOfLastRecord, filteredOrders.length)} of {filteredOrders.length} projects
+          </div>
+          <div className="d-flex align-items-center gap-3">
+            <Button
+              variant="outline-primary"
+              size="sm"
+              onClick={() => paginate(currentPage - 1)}
+              disabled={currentPage === 1}
+              className="px-4 py-2"
+            >
+              Previous
+            </Button>
+            <span className="text-muted">
+              Page {currentPage} of {totalPages}
+            </span>
+            <Button
+              variant="outline-primary"
+              size="sm"
+              onClick={() => paginate(currentPage + 1)}
+              disabled={currentPage === totalPages}
+              className="px-4 py-2"
+            >
+              Next
+            </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Form Modal */}
+      <Modal show={showFormModal} onHide={handleCloseFormModal} size="lg">
+        <Modal.Header closeButton>
+          <Modal.Title>{editingId ? 'Edit Project' : 'Add New Project'}</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
           <Form onSubmit={handleSubmit}>
-            <div className="row">
-              <div className="col-md-4">
-                <Form.Group className="mb-3">
-                  <Form.Label>Project Name/Code*</Form.Label>
+            <div className="row g-3">
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label>Project Name/Code <span className="text-danger">*</span></Form.Label>
                   <Form.Control
                     type="text"
                     value={order.projectName}
@@ -330,9 +628,20 @@ const NormalOrders = () => {
                   />
                 </Form.Group>
               </div>
-              <div className="col-md-4">
-                <Form.Group className="mb-3">
-                  <Form.Label>Order Date*</Form.Label>
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label>Season <span className="text-danger">*</span></Form.Label>
+                  <Form.Control
+                    type="text"
+                    value={order.season}
+                    onChange={(e) => setOrder({ ...order, season: e.target.value })}
+                    required
+                  />
+                </Form.Group>
+              </div>
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label>Order Date <span className="text-danger">*</span></Form.Label>
                   <Form.Control
                     type="date"
                     value={order.orderDate}
@@ -341,9 +650,9 @@ const NormalOrders = () => {
                   />
                 </Form.Group>
               </div>
-              <div className="col-md-4">
-                <Form.Group className="mb-3">
-                  <Form.Label>Submission Date*</Form.Label>
+              <div className="col-md-6">
+                <Form.Group>
+                  <Form.Label>Due Date <span className="text-danger">*</span></Form.Label>
                   <Form.Control
                     type="date"
                     value={order.submissionDate}
@@ -352,12 +661,9 @@ const NormalOrders = () => {
                   />
                 </Form.Group>
               </div>
-            </div>
-
-            <div className="row">
               <div className="col-md-6">
-                <Form.Group className="mb-3">
-                  <Form.Label>Writer Name*</Form.Label>
+                <Form.Group>
+                  <Form.Label>Assigned To <span className="text-danger">*</span></Form.Label>
                   <Form.Control
                     type="text"
                     value={order.supervisorName}
@@ -367,35 +673,21 @@ const NormalOrders = () => {
                 </Form.Group>
               </div>
               <div className="col-md-6">
-                <Form.Group className="mb-3">
-                  <Form.Label>Season*</Form.Label>
-                  <Form.Control
-                    type="text"
-                    value={order.season}
-                    onChange={(e) => setOrder({ ...order, season: e.target.value })}
-                    required
-                  />
-                </Form.Group>
-              </div>
-            </div>
-
-            <div className="row">
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
+                <Form.Group>
                   <Form.Label>Status</Form.Label>
                   <Form.Select
                     value={order.status}
                     onChange={(e) => setOrder({ ...order, status: e.target.value })}
                   >
-                    <option>Pending</option>
-                    <option>In Progress</option>
-                    <option>Completed</option>
+                    <option value="Pending">Pending</option>
+                    <option value="In Progress">In Progress</option>
+                    <option value="Completed">Completed</option>
                   </Form.Select>
                 </Form.Group>
               </div>
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Word Count*</Form.Label>
+              <div className="col-md-4">
+                <Form.Group>
+                  <Form.Label>Word Count <span className="text-danger">*</span></Form.Label>
                   <Form.Control
                     type="number"
                     value={order.wordCount}
@@ -406,37 +698,40 @@ const NormalOrders = () => {
                   />
                 </Form.Group>
               </div>
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Cost Per Page (CPP)*</Form.Label>
-                  <Form.Control
-                    type="number"
-                    value={order.cpp}
-                    onChange={(e) => handleBudgetInputChange(e, 'cpp')}
-                    required
-                    min="0"
-                    step="1"
-                  />
+              <div className="col-md-4">
+                <Form.Group>
+                  <Form.Label>Cost Per Page <span className="text-danger">*</span></Form.Label>
+                  <InputGroup>
+                    <InputGroup.Text>Ksh.</InputGroup.Text>
+                    <Form.Control
+                      type="number"
+                      value={order.cpp}
+                      onChange={(e) => handleBudgetInputChange(e, 'cpp')}
+                      required
+                      min="0"
+                      step="1"
+                    />
+                  </InputGroup>
                 </Form.Group>
               </div>
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Code Price*</Form.Label>
-                  <Form.Control
-                    type="number"
-                    value={order.codePrice}
-                    onChange={(e) => handleBudgetInputChange(e, 'codePrice')}
-                    required
-                    min="0"
-                    step="1"
-                  />
+              <div className="col-md-4">
+                <Form.Group>
+                  <Form.Label>Code Price <span className="text-danger">*</span></Form.Label>
+                  <InputGroup>
+                    <InputGroup.Text>Ksh.</InputGroup.Text>
+                    <Form.Control
+                      type="number"
+                      value={order.codePrice}
+                      onChange={(e) => handleBudgetInputChange(e, 'codePrice')}
+                      required
+                      min="0"
+                      step="1"
+                    />
+                  </InputGroup>
                 </Form.Group>
               </div>
-            </div>
-
-            <div className="row">
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
+              <div className="col-md-4">
+                <Form.Group>
                   <Form.Check
                     type="checkbox"
                     label="Includes Code"
@@ -446,235 +741,52 @@ const NormalOrders = () => {
                   />
                 </Form.Group>
               </div>
-              <div className="col-md-3">
-                <Form.Group className="mb-3">
-                  <Form.Label>Calculated Amount</Form.Label>
-                  <Form.Control
-                    type="number"
-                    value={order.budget}
-                    readOnly
-                    disabled
-                  />
+              <div className="col-md-4">
+                <Form.Group>
+                  <Form.Label>Total Budget</Form.Label>
+                  <InputGroup>
+                    <InputGroup.Text>Ksh.</InputGroup.Text>
+                    <Form.Control
+                      type="number"
+                      value={order.budget}
+                      readOnly
+                      disabled
+                    />
+                  </InputGroup>
                 </Form.Group>
               </div>
-              <div className="col-md-6">
-                <Form.Group className="mb-3">
+              <div className="col-md-4">
+                <Form.Group>
                   <Form.Label>Progress (0-100%)</Form.Label>
-                  <Form.Control
-                    type="number"
-                    min="0"
-                    max="100"
-                    value={order.progress}
-                    onChange={(e) => setOrder({ ...order, progress: e.target.value })}
-                  />
+                  <InputGroup>
+                    <Form.Control
+                      type="number"
+                      min="0"
+                      max="100"
+                      value={order.progress}
+                      onChange={(e) => setOrder({ ...order, progress: e.target.value })}
+                    />
+                    <InputGroup.Text>%</InputGroup.Text>
+                  </InputGroup>
                 </Form.Group>
               </div>
-            </div>
-
-            <div className="mt-3">
-              <Button type="submit" variant="primary" className="me-2">
-                {editingId ? 'Update Order' : 'Add Order'}
-              </Button>
-              {editingId && (
-                <Button
-                  variant="secondary"
-                  onClick={() => {
-                    setOrder(initialOrderState);
-                    setEditingId(null);
-                  }}
-                >
-                  Cancel Edit
-                </Button>
-              )}
             </div>
           </Form>
-        </Card.Body>
-      </Card>
-
-      <div className="d-flex justify-content-between align-items-center mb-4">
-        <h3 className="mb-0">Normal Orders List</h3>
-        <div className="d-flex gap-3 align-items-center">
-          <InputGroup style={{ width: '300px' }}>
-            <InputGroup.Text><Search size={20} /></InputGroup.Text>
-            <Form.Control
-              placeholder="Search orders..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-            />
-          </InputGroup>
-          <InputGroup>
-            <InputGroup.Text><Calendar size={20} /></InputGroup.Text>
-            <Form.Control
-              type="date"
-              value={dateRange.start}
-              onChange={(e) => setDateRange(prev => ({ ...prev, start: e.target.value }))}
-              placeholder="Start Date"
-            />
-            <Form.Control
-              type="date"
-              value={dateRange.end}
-              onChange={(e) => setDateRange(prev => ({ ...prev, end: e.target.value }))}
-              placeholder="End Date"
-            />
-            <Button variant="outline-secondary" onClick={handleRefreshSearch} title="Reset Filters">
-              <RefreshCw size={18} className="me-2" />Reset
-            </Button>
-          </InputGroup>
-          <Form.Select
-            style={{ width: '100px' }}
-            value={recordsPerPage}
-            onChange={(e) => {
-              setRecordsPerPage(Number(e.target.value));
-              setCurrentPage(1);
-            }}
-          >
-            <option value={5}>5</option>
-            <option value={10}>10</option>
-            <option value={15}>15</option>
-            <option value={20}>20</option>
-          </Form.Select>
-          <Button variant="success" onClick={exportToExcel}>
-            Export to Excel
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={handleCloseFormModal}>
+            Cancel
           </Button>
-        </div>
-      </div>
-
-      <div className="table-responsive">
-        <Table striped bordered hover className="shadow-sm">
-          <thead className="table-dark">
-            <tr>
-              <th>#</th>
-              <th onClick={() => handleSort('projectName')} style={{ cursor: 'pointer' }}>
-                Project Name{' '}
-                {sortColumn === 'projectName' && <ArrowUpDown size={16} className="ms-1" />}
-              </th>
-              <th onClick={() => handleSort('supervisorName')} style={{ cursor: 'pointer' }}>
-                Writer{' '}
-                {sortColumn === 'supervisorName' && <ArrowUpDown size={16} className="ms-1" />}
-              </th>
-              <th onClick={() => handleSort('orderDate')} style={{ cursor: 'pointer' }}>
-                Order Date{' '}
-                {sortColumn === 'orderDate' && <ArrowUpDown size={16} className="ms-1" />}
-              </th>
-              <th onClick={() => handleSort('submissionDate')} style={{ cursor: 'pointer' }}>
-                Submission Date{' '}
-                {sortColumn === 'submissionDate' && <ArrowUpDown size={16} className="ms-1" />}
-              </th>
-              <th onClick={() => handleSort('status')} style={{ cursor: 'pointer' }}>
-                Status{' '}
-                {sortColumn === 'status' && <ArrowUpDown size={16} className="ms-1" />}
-              </th>
-              <th onClick={() => handleSort('season')} style={{ cursor: 'pointer' }}>
-                Season{' '}
-                {sortColumn === 'season' && <ArrowUpDown size={16} className="ms-1" />}
-              </th>
-              <th onClick={() => handleSort('budget')} style={{ cursor: 'pointer' }}>
-                Total Amount{' '}
-                {sortColumn === 'budget' && <ArrowUpDown size={16} className="ms-1" />}
-              </th>
-              <th onClick={() => handleSort('wordCount')} style={{ cursor: 'pointer' }}>
-                Word Count{' '}
-                {sortColumn === 'wordCount' && <ArrowUpDown size={16} className="ms-1" />}
-              </th>
-              <th>Has Code</th>
-              <th onClick={() => handleSort('progress')} style={{ cursor: 'pointer' }}>
-                Progress{' '}
-                {sortColumn === 'progress' && <ArrowUpDown size={16} className="ms-1" />}
-              </th>
-              <th>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {currentRecords.map((ord, index) => (
-              <tr key={ord.id}>
-                <td>{indexOfFirstRecord + index + 1}</td>
-                <td>{ord.projectName}</td>
-                <td>{ord.supervisorName}</td>
-                <td>{new Date(ord.orderDate).toLocaleDateString()}</td>
-                <td>{new Date(ord.submissionDate).toLocaleDateString()}</td>
-                <td>
-                  <Badge bg={getStatusBadgeVariant(ord.status, ord.orderDate, ord.submissionDate)}>
-                    {ord.status}
-                    {isOverdue(ord.orderDate, ord.submissionDate, ord.status) && ' (Overdue)'}
-                  </Badge>
-                </td>
-                <td>{ord.season}</td>
-                <td>Ksh.{ord.budget?.toLocaleString() ?? 0}</td>
-                <td>{ord.wordCount?.toLocaleString() ?? 0}</td>
-                <td>
-                  <Badge bg={ord.hasCode ? 'success' : 'secondary'}>
-                    {ord.hasCode ? 'Yes' : 'No'}
-                  </Badge>
-                </td>
-                <td>
-                  <OverlayTrigger
-                    placement="top"
-                    overlay={<Tooltip>Progress: {ord.progress}%</Tooltip>}
-                  >
-                    <ProgressBar
-                      now={ord.progress}
-                      label={`${ord.progress}%`}
-                      variant={ord.progress >= 75 ? 'success' : ord.progress >= 50 ? 'warning' : 'danger'}
-                      style={{ height: '20px', cursor: 'pointer' }}
-                    />
-                  </OverlayTrigger>
-                </td>
-                <td>
-                  <Button
-                    variant="warning"
-                    size="sm"
-                    onClick={() => handleEdit(ord)}
-                    className="me-2"
-                  >
-                    Edit
-                  </Button>
-                  <Button
-                    variant="danger"
-                    size="sm"
-                    onClick={() => handleDelete(ord.id)}
-                  >
-                    Delete
-                  </Button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </Table>
-      </div>
-
-      {filteredOrders.length > recordsPerPage && (
-        <div className="d-flex justify-content-between align-items-center mt-3">
-          <div>
-            Showing {indexOfFirstRecord + 1} to {Math.min(indexOfLastRecord, filteredOrders.length)} of {filteredOrders.length} orders
-          </div>
-          <nav>
-            <ul className="pagination mb-0">
-              <li className={`page-item ${currentPage === 1 ? 'disabled' : ''}`}>
-                <Button variant="outline-primary" size="sm" onClick={() => paginate(currentPage - 1)} disabled={currentPage === 1}>
-                  Previous
-                </Button>
-              </li>
-              {[...Array(totalPages)].map((_, i) => (
-                <li key={i + 1} className={`page-item ${currentPage === i + 1 ? 'active' : ''}`}>
-                  <Button variant={currentPage === i + 1 ? 'primary' : 'outline-primary'} size="sm" onClick={() => paginate(i + 1)}>
-                    {i + 1}
-                  </Button>
-                </li>
-              ))}
-              <li className={`page-item ${currentPage === totalPages ? 'disabled' : ''}`}>
-                <Button variant="outline-primary" size="sm" onClick={() => paginate(currentPage + 1)} disabled={currentPage === totalPages}>
-                  Next
-                </Button>
-              </li>
-            </ul>
-          </nav>
-        </div>
-      )}
+          <Button variant="primary" onClick={handleSubmit}>
+            {editingId ? 'Update Project' : 'Add Project'}
+          </Button>
+        </Modal.Footer>
+      </Modal>
 
       {/* Bulk Import Modal */}
       <Modal show={showImportModal} onHide={() => setShowImportModal(false)}>
         <Modal.Header closeButton>
-          <Modal.Title>Bulk Import Normal Orders</Modal.Title>
+          <Modal.Title>Import Projects</Modal.Title>
         </Modal.Header>
         <Modal.Body>
           <Form.Group>
@@ -685,7 +797,7 @@ const NormalOrders = () => {
               onChange={handleFileUpload}
             />
             <small className="text-muted">
-              File should have columns: Project Name, Order Date, Submission Date, Writer, Season, Status, Word Count, CPP, Code Price, Has Code, Progress
+              File should have columns: Project Name, Order Date, Due Date, Writer, Season, Status, Word Count, CPP, Code Price, Has Code, Progress
             </small>
           </Form.Group>
         </Modal.Body>
@@ -695,6 +807,39 @@ const NormalOrders = () => {
           </Button>
           <Button variant="primary" onClick={importOrders}>
             Import
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Export Columns Selection Modal */}
+      <Modal show={showExportModal} onHide={() => setShowExportModal(false)}>
+        <Modal.Header closeButton>
+          <Modal.Title>Select Columns to Export</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form>
+            {Object.keys(selectedColumns).map(column => (
+              <Form.Check
+                key={column}
+                type="checkbox"
+                label={column === 'supervisorName' ? 'Assigned To' : 
+                      column === 'budget' ? 'Total Budget' : 
+                      column === 'isOverdue' ? 'Overdue Status' : 
+                      column === 'submissionDate' ? 'Due Date' : 
+                      column.charAt(0).toUpperCase() + column.slice(1)}
+                checked={selectedColumns[column]}
+                onChange={() => handleColumnToggle(column)}
+                className="mb-2"
+              />
+            ))}
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowExportModal(false)}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleExportConfirm}>
+            Export
           </Button>
         </Modal.Footer>
       </Modal>

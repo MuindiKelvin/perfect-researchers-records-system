@@ -41,6 +41,7 @@ const Dissertations = () => {
   const [showGanttModal, setShowGanttModal] = useState(false);
   const [showImportModal, setShowImportModal] = useState(false);
   const [showPaymentModal, setShowPaymentModal] = useState(false);
+  const [showExportModal, setShowExportModal] = useState(false);
   const [selectedDissertation, setSelectedDissertation] = useState(null);
   const [paymentData, setPaymentData] = useState({
     wordsPaid: 0,
@@ -49,6 +50,24 @@ const Dissertations = () => {
     isFullyPaid: false
   });
   const [importFile, setImportFile] = useState(null);
+  const [selectedColumns, setSelectedColumns] = useState({
+    projectName: true,
+    supervisorName: true,
+    status: true,
+    season: true,
+    hasCode: true,
+    budget: true,
+    totalPaid: true,
+    remainingBalance: true,
+    progress: true,
+    submissionDate: true,
+    orderDate: true,
+    wordCount: true,
+    cpp: true,
+    codePrice: true,
+    isFullyPaid: true,
+    datePaid: true
+  });
 
   useEffect(() => {
     fetchDissertations();
@@ -88,11 +107,9 @@ const Dissertations = () => {
     const submission = new Date(submissionDate);
     const order = new Date(orderDate);
     
-    // Calculate expected duration (dissertations typically need more time)
     const diffTime = Math.abs(submission - order);
     const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
     
-    // If submission date has passed and status is not completed
     return submission < today && diffDays > 0;
   };
 
@@ -219,14 +236,15 @@ const Dissertations = () => {
       ...dissertationToEdit,
       budget: dissertationToEdit.budget?.toString() ?? '0',
       wordCount: dissertationToEdit.wordCount?.toString() ?? '0',
-      cpp: dissertationToEdit.cpp?.toString() ?? '300',
-      codePrice: dissertationToEdit.codePrice?.toString() ?? '1000',
+      cpp: dissertationToEdit.cpp?.toString() ?? '425',
+      codePrice: dissertationToEdit.codePrice?.toString() ?? '10000',
       progress: dissertationToEdit.progress || 0,
       wordsPaid: dissertationToEdit.wordsPaid || 0,
       totalPaid: dissertationToEdit.totalPaid || 0,
       remainingBalance: dissertationToEdit.remainingBalance || 0,
     });
     setEditingId(dissertationToEdit.id);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
   const handlePaymentUpdate = (diss) => {
@@ -262,26 +280,46 @@ const Dissertations = () => {
   };
 
   const exportToExcel = () => {
+    setShowExportModal(true);
+  };
+
+  const handleExportConfirm = () => {
     const workbook = XLSX.utils.book_new();
-    const worksheet = XLSX.utils.json_to_sheet(
-      filteredDissertations.map(({ id, ...rest }) => ({
-        ...rest,
-        orderDate: new Date(rest.orderDate).toLocaleDateString(),
-        submissionDate: new Date(rest.submissionDate).toLocaleDateString(),
-        budget: `Ksh.${rest.budget?.toLocaleString() ?? 0}`,
-        wordCount: rest.wordCount?.toLocaleString() ?? '0',
-        hasCode: rest.hasCode ? 'Yes' : 'No',
-        cpp: `Ksh.${rest.cpp?.toLocaleString() ?? 0}`,
-        codePrice: `Ksh.${rest.codePrice?.toLocaleString() ?? 0}`,
-        progress: `${rest.progress}%`,
-        totalPaid: `Ksh.${rest.totalPaid?.toLocaleString() ?? 0}`,
-        remainingBalance: `Ksh.${rest.remainingBalance?.toLocaleString() ?? 0}`,
-        isFullyPaid: rest.isFullyPaid ? 'Yes' : 'No',
-        datePaid: rest.datePaid ? new Date(rest.datePaid).toLocaleDateString() : 'Not Paid',
-      }))
-    );
+    const exportData = filteredDissertations.map(({ id, ...rest }) => {
+      const row = {};
+      if (selectedColumns.projectName) row['Dissertation Title'] = rest.projectName;
+      if (selectedColumns.supervisorName) row['Writer'] = rest.supervisorName;
+      if (selectedColumns.orderDate) row['Order Date'] = new Date(rest.orderDate).toLocaleDateString();
+      if (selectedColumns.submissionDate) row['Submission Date'] = new Date(rest.submissionDate).toLocaleDateString();
+      if (selectedColumns.status) row['Status'] = rest.status;
+      if (selectedColumns.season) row['Season'] = rest.season;
+      if (selectedColumns.budget) row['Total Amount'] = `Ksh.${rest.budget?.toLocaleString() ?? 0}`;
+      if (selectedColumns.wordCount) row['Word Count'] = rest.wordCount?.toLocaleString() ?? '0';
+      if (selectedColumns.hasCode) row['Has Code'] = rest.hasCode ? 'Yes' : 'No';
+      if (selectedColumns.cpp) row['CPP'] = `Ksh.${rest.cpp?.toLocaleString() ?? 0}`;
+      if (selectedColumns.codePrice) row['Code Price'] = `Ksh.${rest.codePrice?.toLocaleString() ?? 0}`;
+      if (selectedColumns.progress) row['Progress'] = `${rest.progress}%`;
+      if (selectedColumns.totalPaid) row['Amount Paid'] = `Ksh.${rest.totalPaid?.toLocaleString() ?? 0}`;
+      if (selectedColumns.remainingBalance) row['Balance'] = `Ksh.${rest.remainingBalance?.toLocaleString() ?? 0}`;
+      if (selectedColumns.isFullyPaid) row['Fully Paid'] = rest.isFullyPaid ? 'Yes' : 'No';
+      if (selectedColumns.datePaid) row['Date Paid'] = rest.datePaid ? new Date(rest.datePaid).toLocaleDateString() : 'Not Paid';
+      return row;
+    });
+
+    const worksheet = XLSX.utils.json_to_sheet(exportData);
+    
+    // Calculate total amount
+    const totalAmount = filteredDissertations.reduce((sum, diss) => sum + (diss.budget || 0), 0);
+    
+    // Add total amount two rows below and two columns to the right of the last data column
+    const totalRow = filteredDissertations.length + 3; // Two rows below data (1-based indexing)
+    const lastColIndex = Object.keys(exportData[0] || {}).length - 1;
+    const totalCol = lastColIndex >= 0 ? String.fromCharCode(65 + lastColIndex + 2) : 'C'; // Two columns to the right
+    XLSX.utils.sheet_add_aoa(worksheet, [[`Total Amount: Ksh.${totalAmount.toLocaleString()}`]], { origin: `${totalCol}${totalRow}` });
+
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Dissertations');
     XLSX.writeFile(workbook, `dissertations_${new Date().toISOString().split('T')[0]}.xlsx`);
+    setShowExportModal(false);
   };
 
   const getStatusBadgeVariant = (status, orderDate, submissionDate) => {
@@ -334,7 +372,10 @@ const Dissertations = () => {
     setSearchTerm('');
   };
 
-  // Gantt Chart Data
+  const handleColumnToggle = (column) => {
+    setSelectedColumns(prev => ({ ...prev, [column]: !prev[column] }));
+  };
+
   const ganttData = [
     [
       { type: 'string', label: 'Task ID' },
@@ -947,6 +988,41 @@ const Dissertations = () => {
             reader.readAsArrayBuffer(importFile);
           }}>
             Import
+          </Button>
+        </Modal.Footer>
+      </Modal>
+
+      {/* Export Columns Selection Modal */}
+      <Modal show={showExportModal} onHide={() => setShowExportModal(false)}>
+        <Modal.Header closeButton>
+          <Modal.Title>Select Columns to Export</Modal.Title>
+        </Modal.Header>
+        <Modal.Body>
+          <Form>
+            {Object.keys(selectedColumns).map(column => (
+              <Form.Check
+                key={column}
+                type="checkbox"
+                label={column === 'supervisorName' ? 'Writer' : 
+                      column === 'projectName' ? 'Dissertation Title' : 
+                      column === 'budget' ? 'Total Amount' : 
+                      column === 'totalPaid' ? 'Amount Paid' : 
+                      column === 'remainingBalance' ? 'Balance' : 
+                      column === 'isFullyPaid' ? 'Fully Paid' : 
+                      column === 'datePaid' ? 'Date Paid' : 
+                      column.charAt(0).toUpperCase() + column.slice(1)}
+                checked={selectedColumns[column]}
+                onChange={() => handleColumnToggle(column)}
+              />
+            ))}
+          </Form>
+        </Modal.Body>
+        <Modal.Footer>
+          <Button variant="secondary" onClick={() => setShowExportModal(false)}>
+            Cancel
+          </Button>
+          <Button variant="primary" onClick={handleExportConfirm}>
+            Export
           </Button>
         </Modal.Footer>
       </Modal>
