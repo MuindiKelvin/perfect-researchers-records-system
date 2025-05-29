@@ -394,21 +394,21 @@ const NormalOrders = () => {
             onClick={() => setShowFormModal(true)}
             className="px-4 py-2"
           >
-            <i className="bi bi-plus-circle me-2"></i>New Project
+            <i className="bi bi-plus-circle me-2"></i>Add New Normal Order
           </Button>
           <Button 
             variant="outline-info" 
             onClick={() => setShowImportModal(true)}
             className="px-4 py-2"
           >
-            <Upload size={16} className="me-2" />Import
+            <Upload size={16} className="me-2" />Import Existing Normal Orders
           </Button>
           <Button 
             variant="outline-success" 
             onClick={exportToExcel}
             className="px-4 py-2"
           >
-            <i className="bi bi-download me-2"></i>Export
+            <i className="bi bi-download me-2"></i>Export to Excel
           </Button>
         </div>
       </div>
